@@ -1,36 +1,18 @@
-import json
 from datetime import datetime
 from collections import Counter
 
 import flet as ft
 
-STORAGE_KEY = "lost_items_v2"
+STORAGE_KEY = "lost_items_v3"
 
 
 def main(page: ft.Page):
-    page.title = "なくしもの記録"
+    page.title = "なくしもの探知機"
     page.theme_mode = ft.ThemeMode.LIGHT
     page.padding = 20
     page.scroll = ft.ScrollMode.AUTO
 
     records = []
-
-    name_input = ft.TextField(
-        label="なくした物",
-        hint_text="例: 鍵、スマホ、財布",
-        width=300,
-        autofocus=True,
-    )
-    location_input = ft.TextField(
-        label="見つかった場所",
-        hint_text="例: ソファの隙間",
-        width=300,
-    )
-
-    ranking_list = ft.Column(spacing=4)
-    history_list = ft.Column(spacing=4)
-    empty_ranking = ft.Text("まだ記録がありません", italic=True, color=ft.Colors.GREY)
-    empty_history = ft.Text("まだ記録がありません", italic=True, color=ft.Colors.GREY)
 
     def load():
         try:
@@ -47,61 +29,84 @@ def main(page: ft.Page):
         except Exception:
             pass
 
-    def refresh():
-        ranking_list.controls.clear()
-        history_list.controls.clear()
+    search_input = ft.TextField(
+        label="なくした物は？",
+        hint_text="例: 財布、鍵、スマホ",
+        width=300,
+        autofocus=True,
+    )
+    result_column = ft.Column(spacing=4)
 
-        counts = Counter(r["name"] for r in records).most_common()
-        if counts:
-            for rank, (name, cnt) in enumerate(counts, 1):
-                medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(rank, f"#{rank}")
-                badge = ft.Container(
-                    ft.Text(f"{cnt}回", weight=ft.FontWeight.BOLD, size=13),
-                    padding=ft.padding.symmetric(horizontal=12, vertical=4),
-                    bgcolor=ft.Colors.RED_50 if cnt >= 3 else ft.Colors.GREY_200,
-                    border_radius=12,
-                )
-                ranking_list.controls.append(
-                    ft.ListTile(
-                        leading=ft.Text(medal, size=20),
-                        title=ft.Text(name, size=16, weight=ft.FontWeight.W_500),
-                        trailing=badge,
-                    )
-                )
-        else:
-            ranking_list.controls.append(empty_ranking)
+    name_input = ft.TextField(
+        label="なくした物",
+        hint_text="例: 鍵、スマホ、財布",
+        width=300,
+    )
+    location_input = ft.TextField(
+        label="見つかった場所",
+        hint_text="例: ソファの隙間",
+        width=300,
+    )
 
-        for i, r in enumerate(reversed(records)):
-            idx = len(records) - 1 - i
-            date_str = r.get("date", "")
-            subtitle_parts = [r.get("location", "場所不明")]
-            if date_str:
-                subtitle_parts.append(f"({date_str})")
-            history_list.controls.append(
-                ft.Card(
-                    ft.ListTile(
-                        title=ft.Text(r["name"], weight=ft.FontWeight.W_500),
-                        subtitle=ft.Text(" / ".join(subtitle_parts), size=13),
-                        trailing=ft.IconButton(
-                            ft.Icons.DELETE_OUTLINE,
-                            icon_color=ft.Colors.RED_300,
-                            on_click=lambda e, i=idx: delete_item(i),
-                        ),
-                    ),
-                    margin=3,
-                )
+    stats_column = ft.Column(spacing=4)
+
+    def do_search(e):
+        result_column.controls.clear()
+        query = search_input.value.strip().lower()
+        if not query:
+            page.show_snack_bar(
+                ft.SnackBar(content=ft.Text("なくした物を入力してください"))
             )
-        if not records:
-            history_list.controls.append(empty_history)
+            page.update()
+            return
+
+        matched = [r for r in records if r["name"].strip().lower() == query]
+        if not matched:
+            result_column.controls.append(
+                ft.Text("該当する記録がありません", italic=True, color=ft.Colors.GREY)
+            )
+            page.update()
+            return
+
+        total = len(matched)
+        location_counts = Counter(r["location"] for r in matched).most_common()
+
+        result_column.controls.append(
+            ft.Text(f"「{search_input.value.strip()}」の過去 {total} 件の記録",
+                    size=16, weight=ft.FontWeight.BOLD)
+        )
+        result_column.controls.append(ft.Divider(height=8))
+
+        for loc, cnt in location_counts:
+            pct = cnt / total * 100
+            bar_width = max(pct * 2, 20)
+            result_column.controls.append(
+                ft.Column([
+                    ft.Row([
+                        ft.Text(loc or "場所不明", size=15, expand=True),
+                        ft.Text(f"{cnt}件 ({pct:.0f}%)", size=13,
+                                weight=ft.FontWeight.BOLD, color=ft.Colors.BLUE_700),
+                    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                    ft.Container(
+                        width=bar_width,
+                        height=8,
+                        bgcolor=ft.Colors.BLUE_300,
+                        border_radius=4,
+                        margin=ft.margin.only(bottom=4),
+                    ),
+                ], spacing=2)
+            )
         page.update()
 
-    def delete_item(idx):
+    def delete_record(idx):
         records.pop(idx)
         save()
-        refresh()
+        refresh_history()
+        refresh_stats()
 
     def add_record(e):
         name = name_input.value.strip()
+        location = location_input.value.strip()
         if not name:
             page.show_snack_bar(
                 ft.SnackBar(
@@ -110,9 +115,17 @@ def main(page: ft.Page):
                 )
             )
             return
+        if not location:
+            page.show_snack_bar(
+                ft.SnackBar(
+                    content=ft.Text("「見つかった場所」を入力してください"),
+                    bgcolor=ft.Colors.RED_400,
+                )
+            )
+            return
         records.append({
             "name": name,
-            "location": location_input.value.strip(),
+            "location": location,
             "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
         })
         save()
@@ -120,51 +133,104 @@ def main(page: ft.Page):
         location_input.value = ""
         name_input.focus()
         page.show_snack_bar(
-            ft.SnackBar(
-                content=ft.Text("記録しました"),
-                bgcolor=ft.Colors.GREEN_400,
-            )
+            ft.SnackBar(content=ft.Text("記録しました"), bgcolor=ft.Colors.GREEN_400)
         )
-        refresh()
+        refresh_history()
+        refresh_stats()
 
-    record_tab = ft.Column(
-        [
-            ft.Text("記録", size=22, weight=ft.FontWeight.BOLD),
-            ft.Divider(height=8),
-            name_input,
-            ft.Text("任意", size=12, color=ft.Colors.GREY),
-            location_input,
-            ft.Button(
-                "記録する",
-                on_click=add_record,
-                icon=ft.Icons.ADD,
-                height=48,
-                width=200,
-            ),
-        ],
-        scroll=ft.ScrollMode.AUTO,
-        spacing=12,
-    )
+    history_list = ft.Column(spacing=4)
 
-    ranking_tab = ft.Column(
-        [
-            ft.Text("よくなくす物ランキング", size=22, weight=ft.FontWeight.BOLD),
-            ft.Divider(height=8),
-            ranking_list,
-        ],
-        scroll=ft.ScrollMode.AUTO,
-        spacing=12,
-    )
+    def refresh_history():
+        history_list.controls.clear()
+        if not records:
+            history_list.controls.append(
+                ft.Text("まだ記録がありません", italic=True, color=ft.Colors.GREY)
+            )
+            page.update()
+            return
+        for i, r in enumerate(reversed(records)):
+            idx = len(records) - 1 - i
+            history_list.controls.append(
+                ft.Card(
+                    ft.ListTile(
+                        title=ft.Text(r["name"], weight=ft.FontWeight.W_500),
+                        subtitle=ft.Text(f"{r.get('location', '場所不明')}  ({r.get('date', '')})",
+                                        size=13),
+                        trailing=ft.IconButton(
+                            ft.Icons.DELETE_OUTLINE,
+                            icon_color=ft.Colors.RED_300,
+                            on_click=lambda e, i=idx: delete_record(i),
+                        ),
+                    ),
+                    margin=3,
+                )
+            )
+        page.update()
 
-    history_tab = ft.Column(
-        [
-            ft.Text("履歴", size=22, weight=ft.FontWeight.BOLD),
-            ft.Divider(height=8),
-            history_list,
-        ],
-        scroll=ft.ScrollMode.AUTO,
-        spacing=12,
-    )
+    def refresh_stats():
+        stats_column.controls.clear()
+        if not records:
+            stats_column.controls.append(
+                ft.Text("まだ記録がありません", italic=True, color=ft.Colors.GREY)
+            )
+            page.update()
+            return
+
+        item_locations = {}
+        for r in records:
+            item = r["name"]
+            loc = r.get("location", "場所不明")
+            if item not in item_locations:
+                item_locations[item] = Counter()
+            item_locations[item][loc] += 1
+
+        for item, locs in sorted(item_locations.items()):
+            total = sum(locs.values())
+            top = locs.most_common(3)
+            stats_column.controls.append(
+                ft.Card(
+                    ft.Column([
+                        ft.Text(f"{item}  ({total}件)", size=16, weight=ft.FontWeight.BOLD),
+                        ft.Column([
+                            ft.Row([
+                                ft.Text(f"  {loc}", size=14, expand=True),
+                                ft.Text(f"{cnt}回", size=13,
+                                        weight=ft.FontWeight.BOLD, color=ft.Colors.BLUE_700),
+                            ])
+                            for loc, cnt in top
+                        ], spacing=2),
+                        ft.Divider(),
+                    ], spacing=4),
+                    margin=ft.margin.symmetric(vertical=4),
+                )
+            )
+        page.update()
+
+    search_tab = ft.Column([
+        ft.Text("なくしものを探す", size=22, weight=ft.FontWeight.BOLD),
+        ft.Divider(height=8),
+        search_input,
+        ft.Button("探す", on_click=do_search, icon=ft.Icons.SEARCH, height=48),
+        ft.Divider(height=16),
+        result_column,
+    ], scroll=ft.ScrollMode.AUTO, spacing=12)
+
+    record_tab = ft.Column([
+        ft.Text("新しい記録", size=22, weight=ft.FontWeight.BOLD),
+        ft.Divider(height=8),
+        name_input,
+        location_input,
+        ft.Button("記録する", on_click=add_record, icon=ft.Icons.ADD, height=48),
+        ft.Divider(height=16),
+        ft.Text("記録履歴", size=16, weight=ft.FontWeight.BOLD),
+        history_list,
+    ], scroll=ft.ScrollMode.AUTO, spacing=12)
+
+    stats_tab = ft.Column([
+        ft.Text("物×場所 統計", size=22, weight=ft.FontWeight.BOLD),
+        ft.Divider(height=8),
+        stats_column,
+    ], scroll=ft.ScrollMode.AUTO, spacing=12)
 
     page.add(
         ft.Tabs(
@@ -176,25 +242,27 @@ def main(page: ft.Page):
                 controls=[
                     ft.TabBar(
                         tabs=[
+                            ft.Tab(label="探す", icon=ft.Icons.SEARCH),
                             ft.Tab(label="記録", icon=ft.Icons.ADD_CIRCLE),
-                            ft.Tab(label="ランキング", icon=ft.Icons.EMOJI_EVENTS),
-                            ft.Tab(label="履歴", icon=ft.Icons.LIST),
+                            ft.Tab(label="統計", icon=ft.Icons.BAR_CHART),
                         ],
                     ),
                     ft.TabBarView(
                         expand=True,
                         controls=[
+                            ft.Container(content=search_tab, padding=10),
                             ft.Container(content=record_tab, padding=10),
-                            ft.Container(content=ranking_tab, padding=10),
-                            ft.Container(content=history_tab, padding=10),
+                            ft.Container(content=stats_tab, padding=10),
                         ],
                     ),
                 ],
             ),
         )
     )
+
     records[:] = load()
-    refresh()
+    refresh_history()
+    refresh_stats()
 
 
 ft.run(main, view=ft.AppView.WEB_BROWSER)
