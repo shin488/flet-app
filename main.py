@@ -436,19 +436,13 @@ def main(page: ft.Page):
         loc_diversity = len(set(locs)) / total if total > 0 else 0
 
         weekday_counts = Counter()
-        has_time_data = False
-        hour_counts = Counter()
         for r in records:
-            fd = r.get("found_date", "")
-            try:
-                dt = datetime.strptime(fd, "%Y-%m-%d %H:%M")
-                weekday_counts[dt.weekday()] += 1
-                hour_counts[dt.hour // 4] += 1
-                has_time_data = True
-            except ValueError:
-                pass
+            d = r.get("lost_date", "") or r.get("found_date", "")[:10]
+            wd = parse_weekday(d)
+            if wd is not None:
+                weekday_counts[wd] += 1
 
-        if has_time_data:
+        if weekday_counts:
             peak_wd = weekday_counts.most_common(1)[0][0]
             peak_wd_name = WEEKDAYS_JP[peak_wd]
         else:
@@ -462,7 +456,7 @@ def main(page: ft.Page):
             top_repeat = repeat_items[0]
             lines.append(f"🏆 最多記録: 「{top_repeat[0]}」を{top_repeat[1]}回")
         lines.append(f"📂 よくなくすカテゴリ: {top_cat}")
-        if has_time_data:
+        if weekday_counts:
             lines.append(f"📅 ピーク曜日: {peak_wd_name}")
 
         title = f"{focus_icon} あなたは「{focus_type}」"
