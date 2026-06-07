@@ -61,6 +61,7 @@ def main(page: ft.Page):
     location_field = ft.TextField(
         label="見つかった場所", hint_text="例: ソファの隙間", width=300,
     )
+    simulation_container = ft.Column(spacing=4)
     history_container = ft.Column(spacing=4)
     ranking_container = ft.Column(spacing=8)
     analysis_container = ft.Column(spacing=8)
@@ -225,8 +226,40 @@ def main(page: ft.Page):
         outer = ft.Container(height=12, bgcolor=ft.Colors.GREY_200, border_radius=6)
         return ft.Stack([outer, inner])
 
+    def do_time_simulation(query, matched_records):
+        if not matched_records:
+            return []
+        now = datetime.now()
+        current_hour = now.hour
+        current_wd = now.weekday()
+
+        scored = []
+        for r in matched_records:
+            fd = r.get("found_date", "")
+            try:
+                dt = datetime.strptime(fd, "%Y-%m-%d %H:%M")
+            except ValueError:
+                try:
+                    dt = datetime.strptime(fd, "%Y-%m-%d")
+                except ValueError:
+                    continue
+            hour_diff = abs(dt.hour - current_hour)
+            wd_match = 1 if dt.weekday() == current_wd else 0
+            time_score = max(0, 1 - hour_diff / 12)
+            score = time_score * 0.6 + wd_match * 0.4
+            scored.append((r["location"], score))
+        if not scored:
+            return []
+        location_scores = Counter()
+        for loc, sc in scored:
+            location_scores[loc] += sc
+        total_score = sum(location_scores.values())
+        ranked = [(loc, sc, sc / total_score * 100) for loc, sc in location_scores.most_common()]
+        max_pct = ranked[0][2] if ranked else 0
+        return [(loc, sc, pct, pct == max_pct) for loc, sc, pct in ranked]
+
     def refresh():
-        nonlocal chips_container, results_container, history_container, ranking_container
+        nonlocal chips_container, results_container, simulation_container, history_container, ranking_container
 
         chips = []
         unique = list(dict.fromkeys(r["name"] for r in get_filtered()))
@@ -244,8 +277,10 @@ def main(page: ft.Page):
 
         if results is None:
             results_container.controls = [ft.Text("アイテムを入力して「探す」を押してください", italic=True, color=ft.Colors.GREY)]
+            simulation_container.controls = []
         elif not results:
             results_container.controls = [ft.Text("該当する記録がありません", italic=True, color=ft.Colors.GREY)]
+            simulation_container.controls = []
         else:
             total = sum(cnt for _, cnt, _, _ in results)
             rc = [
@@ -268,6 +303,33 @@ def main(page: ft.Page):
                     ft.Text(f"{cnt}件", size=11, color=ft.Colors.GREY_600),
                 ], spacing=2))
             results_container.controls = rc
+
+            sim_matched = [r for r in get_filtered() if fuzzy_match(search_val, r["name"])]
+            sim_results = do_time_simulation(search_val, sim_matched)
+            if sim_results:
+                now = datetime.now()
+                wd_name = ["月", "火", "水", "木", "金", "土", "日"][now.weekday()]
+                sim = [
+                    ft.Divider(height=16),
+                    ft.Text("もしもシミュレーター", size=16, weight=ft.FontWeight.BOLD),
+                    ft.Text(f"今は{wd_name}曜日 {now.hour}時台。過去の同時期のデータから予測",
+                            size=12, color=ft.Colors.GREY, italic=True),
+                    ft.Divider(height=4),
+                ]
+                for loc, sc, pct, is_top in sim_results:
+                    color = ft.Colors.GREEN_400 if is_top else ft.Colors.BLUE_300
+                    sim.append(ft.Column([
+                        ft.Row([
+                            ft.Text("🔍 " if is_top else "  ", size=14),
+                            ft.Text(loc, size=14, weight=(
+                                ft.FontWeight.BOLD if is_top else ft.FontWeight.NORMAL), expand=True),
+                            ft.Text(f"{pct:.0f}%", size=13, weight=ft.FontWeight.BOLD, color=color),
+                        ]),
+                        make_bar(pct, color),
+                    ], spacing=1))
+                simulation_container.controls = sim
+            else:
+                simulation_container.controls = []
 
         if not records:
             history_container.controls = [ft.Text("まだ記録がありません", italic=True, color=ft.Colors.GREY)]
@@ -340,8 +402,68 @@ def main(page: ft.Page):
 
         chips_container.update()
         results_container.update()
+        simulation_container.update()
         history_container.update()
         ranking_container.update()
+
+    def build_diagnosis(items, total, unique_items, top_item):
+        if not items:
+            return []
+        ratio = unique_items / total if total > 0 else 0
+        if ratio < 0.25:
+            focus_type = "集中型"
+            focus_desc = "同じ物を繰り返しなくす傾向があります"
+            focus_icon = "🎯"
+        elif ratio < 0.5:
+            focus_type = "バランス型"
+            focus_desc = "まんべんなく色々なくします"
+            focus_icon = "⚖️"
+        else:
+            focus_type = "分散型"
+            focus_desc = "毎回違う物をなくすのが特徴です"
+            focus_icon = "🌈"
+
+        name_counts = Counter(items)
+        repeat_items = [(n, c) for n, c in name_counts.most_common() if c >= 3]
+
+        cats = [r.get("category", "その他") for r in records]
+        top_cat = Counter(cats).most_common(1)[0][0] if cats else "—"
+
+        locs = [r.get("location", "") for r in records if r.get("location")]
+        loc_diversity = len(set(locs)) / total if total > 0 else 0
+
+        weekday_counts = Counter()
+        has_time_data = False
+        hour_counts = Counter()
+        for r in records:
+            fd = r.get("found_date", "")
+            try:
+                dt = datetime.strptime(fd, "%Y-%m-%d %H:%M")
+                weekday_counts[dt.weekday()] += 1
+                hour_counts[dt.hour // 4] += 1
+                has_time_data = True
+            except ValueError:
+                pass
+
+        if has_time_data:
+            peak_wd = weekday_counts.most_common(1)[0][0]
+            peak_wd_name = WEEKDAYS_JP[peak_wd]
+        else:
+            peak_wd_name = "—"
+
+        lines = []
+        lines.append(f"{focus_icon} タイプ: {focus_type}")
+        lines.append(f"  {focus_desc}")
+        lines.append(f"  なくし物の種類: {unique_items}種類 / 全{total}回")
+        if repeat_items:
+            top_repeat = repeat_items[0]
+            lines.append(f"🏆 最多記録: 「{top_repeat[0]}」を{top_repeat[1]}回")
+        lines.append(f"📂 よくなくすカテゴリ: {top_cat}")
+        if has_time_data:
+            lines.append(f"📅 ピーク曜日: {peak_wd_name}")
+
+        title = f"{focus_icon} あなたは「{focus_type}」"
+        return [title] + lines
 
     def refresh_analysis():
         nonlocal analysis_container
@@ -371,6 +493,23 @@ def main(page: ft.Page):
         best_wd = weekday_total.most_common(1)[0][0] if has_weekday else None
 
         sections = []
+
+        diagnosis_lines = build_diagnosis(items, total, unique_items, top_item)
+        if diagnosis_lines:
+            sections.append(ft.Container(
+                ft.Column([
+                    ft.Text(diagnosis_lines[0], size=16, weight=ft.FontWeight.BOLD),
+                    ft.Divider(height=4),
+                ] + [ft.Text(l, size=13, color=ft.Colors.GREY_700) for l in diagnosis_lines[1:]] +
+                    ([
+                        ft.Divider(height=4),
+                        ft.Text("💡 同じ物を3回以上なくすと診断に反映されます", size=11, color=ft.Colors.GREY_400, italic=True),
+                    ] if not diagnosis_lines[1].startswith("🏆") else []),
+                    spacing=2,
+                ),
+                padding=12, border_radius=8, bgcolor=ft.Colors.AMBER_50,
+            ))
+            sections.append(ft.Divider(height=12))
 
         sections.append(ft.Text("全体統計", size=18, weight=ft.FontWeight.BOLD))
         sections.append(ft.Divider(height=8))
@@ -535,6 +674,8 @@ def main(page: ft.Page):
             chips_container,
             ft.Divider(height=8),
             results_container,
+            ft.Divider(height=8),
+            simulation_container,
         ], scroll=ft.ScrollMode.AUTO, spacing=12),
         ft.Column([
             ft.Text("新しい記録", size=22, weight=ft.FontWeight.BOLD),
