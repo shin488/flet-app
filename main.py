@@ -43,8 +43,6 @@ def main(page: ft.Page):
     page.bgcolor = ft.Colors.GREEN_50
 
     page.scroll = ft.ScrollMode.AUTO
-    page.theme_mode = ft.ThemeMode.LIGHT
-    page.window.title_bar_buttons_hidden = True
     records = []
     search_val = ""
     search_cat = ""
