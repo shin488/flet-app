@@ -122,7 +122,7 @@ def main(page: ft.Page):
             refresh_analysis()
 
     def on_search_click(e):
-        nonlocal results
+        nonlocal search_val, results
         q = search_ref.current.value.strip()
         if not q:
             e.page.show_snack_bar(ft.SnackBar(content=ft.Text("なくした物を入力してください")))
@@ -303,32 +303,39 @@ def main(page: ft.Page):
         chips_container.controls = chips
 
         if results is None:
-            results_container.controls = [ft.Text("アイテムを入力して「探す」を押してください", italic=True, color=ft.Colors.GREY)]
+            results_container.controls = [ft.Text("アイテムを入力して「探す」を押してください", color=ft.Colors.GREY_500)]
             simulation_container.controls = []
         elif not results:
-            results_container.controls = [ft.Text("該当する記録がありません", italic=True, color=ft.Colors.GREY)]
+            results_container.controls = [ft.Text("該当する記録がありません", color=ft.Colors.GREY_500)]
             simulation_container.controls = []
         else:
             total = sum(cnt for _, cnt, _, _ in results)
+            name = search_val.strip()
             rc = [
-                ft.Text(f"「{search_val.strip()}」が見つかりそうな場所",
-                        size=16, weight=ft.FontWeight.BOLD),
-                ft.Text(f"過去 {total} 件の記録をもとに予測",
-                        size=12, color=ft.Colors.GREY, italic=True),
-                ft.Divider(height=8),
+                ft.Text(f"「{name}」が見つかりそうな場所",
+                        size=17, weight=ft.FontWeight.BOLD),
+                ft.Text(f"過去 {total} 件の記録から予測",
+                        size=12, color=ft.Colors.GREY_600),
+                ft.Divider(height=4),
             ]
             for loc, cnt, pct, is_top in results:
-                color = ft.Colors.DEEP_ORANGE_400 if is_top else ft.Colors.INDIGO_400
-                rc.append(ft.Column([
-                    ft.Row([
-                        ft.Text("👑 " if is_top else "", size=14),
-                        ft.Text(loc, size=15, weight=(
-                            ft.FontWeight.BOLD if is_top else ft.FontWeight.NORMAL), expand=True),
-                        ft.Text(f"{pct:.0f}%", size=14, weight=ft.FontWeight.BOLD, color=color),
-                    ]),
-                    make_bar(pct, color),
-                    ft.Text(f"{cnt}件", size=11, color=ft.Colors.GREY_600),
-                ], spacing=2))
+                color = ft.Colors.DEEP_ORANGE if is_top else ft.Colors.BLUE_600
+                card = ft.Container(
+                    content=ft.Column([
+                        ft.Row([
+                            ft.Text(loc, size=14, weight=(
+                                ft.FontWeight.BOLD if is_top else ft.FontWeight.W_500), expand=True),
+                            ft.Text(f"{pct:.0f}%", size=15, weight=ft.FontWeight.BOLD, color=color),
+                        ]),
+                        make_bar(pct, ft.Colors.ORANGE_400 if is_top else ft.Colors.BLUE_300),
+                        ft.Text(f"{cnt}件", size=11, color=ft.Colors.GREY_600),
+                    ], spacing=3),
+                    padding=10,
+                    bgcolor=ft.Colors.ORANGE_50 if is_top else ft.Colors.WHITE,
+                    border=ft.border.all(1, ft.Colors.ORANGE_200 if is_top else ft.Colors.GREY_200),
+                    border_radius=8,
+                )
+                rc.append(card)
             results_container.controls = rc
 
             sim_matched = [r for r in get_filtered() if fuzzy_match(search_val, r["name"])]
@@ -339,21 +346,27 @@ def main(page: ft.Page):
                 sim = [
                     ft.Divider(height=16),
                     ft.Text("もしもシミュレーター", size=16, weight=ft.FontWeight.BOLD),
-                    ft.Text(f"今は{wd_name}曜日 {now.hour}時台。過去の同時期のデータから予測",
-                            size=12, color=ft.Colors.GREY, italic=True),
+                    ft.Text(f"今は{wd_name}曜日 {now.hour}時台のデータから予測",
+                            size=12, color=ft.Colors.GREY_600),
                     ft.Divider(height=4),
                 ]
                 for loc, sc, pct, is_top in sim_results:
-                    color = ft.Colors.TEAL_400 if is_top else ft.Colors.BLUE_300
-                    sim.append(ft.Column([
-                        ft.Row([
-                            ft.Text("🔍 " if is_top else "  ", size=14),
-                            ft.Text(loc, size=14, weight=(
-                                ft.FontWeight.BOLD if is_top else ft.FontWeight.NORMAL), expand=True),
-                            ft.Text(f"{pct:.0f}%", size=13, weight=ft.FontWeight.BOLD, color=color),
-                        ]),
-                        make_bar(pct, color),
-                    ], spacing=1))
+                    color = ft.Colors.TEAL_600 if is_top else ft.Colors.BLUE_400
+                    card = ft.Container(
+                        content=ft.Column([
+                            ft.Row([
+                                ft.Text(loc, size=14, weight=(
+                                    ft.FontWeight.BOLD if is_top else ft.FontWeight.W_500), expand=True),
+                                ft.Text(f"{pct:.0f}%", size=14, weight=ft.FontWeight.BOLD, color=color),
+                            ]),
+                            make_bar(pct, ft.Colors.TEAL_300 if is_top else ft.Colors.BLUE_200),
+                        ], spacing=3),
+                        padding=10,
+                        bgcolor=ft.Colors.TEAL_50 if is_top else ft.Colors.WHITE,
+                        border=ft.border.all(1, ft.Colors.TEAL_200 if is_top else ft.Colors.GREY_200),
+                        border_radius=8,
+                    )
+                    sim.append(card)
                 simulation_container.controls = sim
             else:
                 simulation_container.controls = []
