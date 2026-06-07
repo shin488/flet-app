@@ -110,8 +110,7 @@ def main(page: ft.Page):
         search_val = name
         search_field.value = name
         results = do_search(name)
-        current_tab = 0
-        root_tabs.selected_index = 0
+        switch_tab(0)
         refresh()
 
     def on_search_click(e):
@@ -228,12 +227,6 @@ def main(page: ft.Page):
             ],
         )
         e.page.show_dialog(dlg)
-
-    def on_tab_change(e):
-        nonlocal current_tab
-        current_tab = e.control.selected_index
-        if current_tab == 3:
-            refresh_analysis()
 
     async def animate_bar(bar, pct_text, pct, color, delay):
         await asyncio.sleep(delay)
@@ -573,70 +566,84 @@ def main(page: ft.Page):
     date_field.on_change = lambda e: setattr(date_field, 'value', e.control.value)
     location_field.on_change = lambda e: setattr(location_field, 'value', e.control.value)
 
-    tab_search = ft.Column([
-        ft.Text("なくしものを探す", size=22, weight=ft.FontWeight.BOLD),
-        ft.Divider(height=8),
-        search_dropdown,
-        ft.Row([search_field, ft.Button("探す", on_click=on_search_click, icon=ft.Icons.SEARCH, height=48)]),
-        chips_container,
-        ft.Divider(height=8),
-        results_container,
-    ], scroll=ft.ScrollMode.AUTO, spacing=12)
-
-    tab_record = ft.Column([
-        ft.Text("新しい記録", size=22, weight=ft.FontWeight.BOLD),
-        ft.Divider(height=8),
-        name_field,
-        category_dropdown,
-        date_field,
-        location_field,
-        ft.Button("記録する", on_click=on_add_record, icon=ft.Icons.ADD, height=48),
-        ft.Divider(height=16),
-        ft.Row([
-            ft.Text("記録履歴", size=16, weight=ft.FontWeight.BOLD),
+    tab_views = [
+        ft.Column([
+            ft.Text("なくしものを探す", size=22, weight=ft.FontWeight.BOLD),
+            ft.Divider(height=8),
+            search_dropdown,
+            ft.Row([search_field, ft.Button("探す", on_click=on_search_click, icon=ft.Icons.SEARCH, height=48)]),
+            chips_container,
+            ft.Divider(height=8),
+            results_container,
+        ], scroll=ft.ScrollMode.AUTO, spacing=12),
+        ft.Column([
+            ft.Text("新しい記録", size=22, weight=ft.FontWeight.BOLD),
+            ft.Divider(height=8),
+            name_field,
+            category_dropdown,
+            date_field,
+            location_field,
+            ft.Button("記録する", on_click=on_add_record, icon=ft.Icons.ADD, height=48),
+            ft.Divider(height=16),
             ft.Row([
-                ft.TextButton("エクスポート", on_click=show_export_dialog),
-                ft.TextButton("インポート", on_click=show_import_dialog),
-            ]),
-        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-        history_container,
-    ], scroll=ft.ScrollMode.AUTO, spacing=12)
+                ft.Text("記録履歴", size=16, weight=ft.FontWeight.BOLD),
+                ft.Row([
+                    ft.TextButton("エクスポート", on_click=show_export_dialog),
+                    ft.TextButton("インポート", on_click=show_import_dialog),
+                ]),
+            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+            history_container,
+        ], scroll=ft.ScrollMode.AUTO, spacing=12),
+        ft.Column([ranking_container], scroll=ft.ScrollMode.AUTO, spacing=12),
+        ft.Column([analysis_container], scroll=ft.ScrollMode.AUTO, spacing=12),
+    ]
 
-    tab_ranking = ft.Column([ranking_container], scroll=ft.ScrollMode.AUTO, spacing=12)
+    tab_data = [
+        (ft.Icons.SEARCH, "探す"),
+        (ft.Icons.ADD_CIRCLE, "記録"),
+        (ft.Icons.EMOJI_EVENTS, "ランキング"),
+        (ft.Icons.BAR_CHART, "分析"),
+    ]
 
-    tab_analysis = ft.Column([analysis_container], scroll=ft.ScrollMode.AUTO, spacing=12)
+    tab_buttons = []
+    for i, (icon, label) in enumerate(tab_data):
+        btn = ft.Container(
+            content=ft.Column([
+                ft.Icon(icon, size=20),
+                ft.Text(label, size=10),
+            ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=1),
+            padding=ft.Padding(8, 10, 8, 10),
+            expand=True,
+            bgcolor=ft.Colors.BLUE_50 if i == 0 else ft.Colors.WHITE,
+            border_radius=ft.border_radius.only(top_left=12 if i == 0 else 0, top_right=12 if i == 3 else 0),
+            ink=True,
+        )
+        btn.on_click = lambda e, idx=i: switch_tab(idx)
+        tab_buttons.append(btn)
 
-    root_tabs = ft.Tabs(
-        selected_index=0,
-        on_change=on_tab_change,
-        tabs=[
-            ft.Tab(
-                text="探す",
-                icon=ft.Icons.SEARCH,
-                content=ft.Container(content=tab_search, padding=10),
-            ),
-            ft.Tab(
-                text="記録",
-                icon=ft.Icons.ADD_CIRCLE,
-                content=ft.Container(content=tab_record, padding=10),
-            ),
-            ft.Tab(
-                text="ランキング",
-                icon=ft.Icons.EMOJI_EVENTS,
-                content=ft.Container(content=tab_ranking, padding=10),
-            ),
-            ft.Tab(
-                text="分析",
-                icon=ft.Icons.ANALYTICS,
-                content=ft.Container(content=tab_analysis, padding=10),
-            ),
-        ],
-        expand=True,
+    tab_bar = ft.Container(
+        content=ft.Row(tab_buttons, spacing=0, tight=True),
+        border=ft.border.only(bottom=ft.BorderSide(2, ft.Colors.BLUE_200)),
     )
+
+    content_area = ft.Column([tab_views[0]], expand=True)
+
+    def switch_tab(idx):
+        nonlocal current_tab
+        old = current_tab
+        current_tab = idx
+        for j, btn in enumerate(tab_buttons):
+            btn.bgcolor = ft.Colors.BLUE_50 if j == idx else ft.Colors.WHITE
+        tab_buttons[old].update()
+        tab_buttons[idx].update()
+        content_area.controls = [tab_views[idx]]
+        content_area.update()
+        if idx == 3:
+            refresh_analysis()
 
     load_from_storage()
 
-    page.add(root_tabs)
+    page.add(tab_bar, content_area)
 
     page.update()
     refresh()
