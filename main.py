@@ -676,6 +676,22 @@ def main(page: ft.Page):
         simulation_container,
     ], scroll=ft.ScrollMode.AUTO, spacing=12)
 
+    def on_date_selected(e):
+        val = e.control.value
+        if val:
+            date_ref.current.value = val.strftime("%Y-%m-%d")
+            date_ref.current.update()
+
+    date_picker = ft.DatePicker(
+        on_change=on_date_selected,
+        first_date=datetime(2000, 1, 1),
+        last_date=datetime.now(),
+    )
+
+    def open_date_picker(e=None):
+        date_picker.open = True
+        date_picker.update()
+
     record_view = ft.Column([
         ft.Text("新しい記録", size=22, weight=ft.FontWeight.BOLD),
         ft.Divider(height=8),
@@ -686,7 +702,17 @@ def main(page: ft.Page):
             options=([ft.dropdown.Option("", "選択してください")] + [ft.dropdown.Option(c) for c in CATEGORIES]),
             width=300,
         ),
-        ft.TextField(ref=date_ref, label="なくした日 (任意)", hint_text="YYYY-MM-DD", width=300),
+        ft.Row([
+            ft.TextField(
+                ref=date_ref,
+                label="なくした日 (任意)",
+                hint_text="タップしてカレンダーから選択",
+                width=300,
+                read_only=True,
+                on_focus=lambda _: open_date_picker(),
+                suffix=ft.IconButton(ft.Icons.CALENDAR_MONTH, on_click=lambda _: open_date_picker()),
+            ),
+        ]),
         ft.TextField(ref=location_ref, label="見つかった場所", hint_text="例: ソファの隙間", width=300),
         ft.Button("記録する", on_click=on_add_record, icon=ft.Icons.ADD),
         ft.Divider(height=16),
@@ -743,6 +769,7 @@ def main(page: ft.Page):
 
     load_from_storage()
 
+    page.overlay.append(date_picker)
     page.add(ft.SafeArea(tabs))
 
     page.update()
