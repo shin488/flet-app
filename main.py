@@ -1,5 +1,6 @@
+import asyncio
 from datetime import datetime
-from collections import Counter
+from collections import Counter, defaultdict
 import json
 import unicodedata
 
@@ -7,12 +8,24 @@ import flet as ft
 
 STORAGE_KEY = "lost_items_v4"
 CATEGORIES = ["財布", "鍵", "スマホ", "イヤホン", "傘", "本", "文房具", "衣類", "カバン", "その他"]
+WEEKDAYS_JP = ["月曜", "火曜", "水曜", "木曜", "金曜", "土曜", "日曜"]
+ANIM_DURATION = 600
 
 
 def fuzzy_match(query: str, text: str) -> bool:
     q = unicodedata.normalize("NFKC", query.strip().lower())
     t = unicodedata.normalize("NFKC", text.strip().lower())
     return bool(q) and (q in t)
+
+
+def parse_weekday(d: str) -> int | None:
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%m-%d", "%m/%d"):
+        try:
+            dt = datetime.strptime(d, fmt)
+            return dt.weekday()
+        except ValueError:
+            pass
+    return None
 
 
 def main(page: ft.Page):
@@ -30,6 +43,7 @@ def main(page: ft.Page):
     record_cat = ""
     record_date = ""
     record_loc = ""
+    anim_tasks = []
 
     search_dropdown = ft.Dropdown(
         label="カテゴリで絞り込み",
@@ -57,6 +71,7 @@ def main(page: ft.Page):
     )
     history_container = ft.Column(spacing=4)
     ranking_container = ft.Column(spacing=8)
+    analysis_container = ft.Column(spacing=8)
 
     def load_from_storage():
         nonlocal records
@@ -133,7 +148,7 @@ def main(page: ft.Page):
             "name": name,
             "category": category_dropdown.value or "その他",
             "location": location,
-            "lost_date": date_field.value.strip() or "",
+            "lost_date": date_field.value.strip() or datetime.now().strftime("%Y-%m-%d"),
             "found_date": datetime.now().strftime("%Y-%m-%d %H:%M"),
         }
         records = records + [rec]
@@ -217,9 +232,29 @@ def main(page: ft.Page):
     def on_tab_change(e):
         nonlocal current_tab
         current_tab = e.control.selected_index
+        if current_tab == 3:
+            refresh_analysis()
+
+    async def animate_bar(bar, pct_text, pct, color, delay):
+        await asyncio.sleep(delay)
+        bar.width = f"{pct}%"
+        bar.update()
+        for i in range(1, int(pct) + 1):
+            pct_text.value = f"{i}%"
+            pct_text.color = color if i > 30 else ft.Colors.GREY_500
+            pct_text.update()
+            await asyncio.sleep(6 / 1000)
+        pct_text.value = f"{pct:.0f}%"
+        pct_text.color = color
+        pct_text.weight = ft.FontWeight.BOLD
+        pct_text.update()
 
     def refresh():
-        nonlocal chips_container, results_container, history_container, ranking_container
+        nonlocal chips_container, results_container, history_container, ranking_container, anim_tasks
+
+        for t in anim_tasks:
+            t.cancel()
+        anim_tasks = []
 
         chips = []
         unique = list(dict.fromkeys(r["name"] for r in get_filtered()))
@@ -236,7 +271,7 @@ def main(page: ft.Page):
         chips_container.controls = chips
 
         if results is None:
-            results_container.controls = []
+            results_container.controls = [ft.Text("アイテムを入力して「探す」を押してください", italic=True, color=ft.Colors.GREY)]
         elif not results:
             results_container.controls = [ft.Text("該当する記録がありません", italic=True, color=ft.Colors.GREY)]
         else:
@@ -248,7 +283,14 @@ def main(page: ft.Page):
                         size=12, color=ft.Colors.GREY, italic=True),
                 ft.Divider(height=8),
             ]
-            for loc, cnt, pct, is_top in results:
+            for i, (loc, cnt, pct, is_top) in enumerate(results):
+                bar = ft.Container(
+                    height=14,
+                    bgcolor=ft.Colors.ORANGE_400 if is_top else ft.Colors.BLUE_400,
+                    border_radius=7,
+                    animate=ft.Animation(ANIM_DURATION, ft.AnimationCurve.EASE_OUT),
+                )
+                pct_text = ft.Text("0%", size=12, weight=ft.FontWeight.NORMAL, color=ft.Colors.GREY_500)
                 rc.append(ft.Column([
                     ft.Row([
                         ft.Row([
@@ -256,16 +298,21 @@ def main(page: ft.Page):
                             ft.Text(loc, size=15, weight=(
                                 ft.FontWeight.BOLD if is_top else ft.FontWeight.NORMAL), expand=True),
                         ], spacing=0),
-                        ft.Text(f"{pct:.0f}%", size=14, weight=ft.FontWeight.BOLD, color=ft.Colors.BLUE_700),
+                        pct_text,
                     ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                     ft.Stack([
-                        ft.Container(height=12, bgcolor=ft.Colors.GREY_200, border_radius=6),
-                        ft.Container(height=12, width=f"{pct}%",
-                                     bgcolor=ft.Colors.BLUE_400 if not is_top else ft.Colors.ORANGE_400,
-                                     border_radius=6),
+                        ft.Container(height=14, bgcolor=ft.Colors.GREY_200, border_radius=7),
+                        bar,
                     ]),
                     ft.Text(f"{cnt}件", size=11, color=ft.Colors.GREY_600),
                 ], spacing=2))
+                delay = i * 150
+                task = asyncio.ensure_future(animate_bar(
+                    bar, pct_text, pct,
+                    ft.Colors.ORANGE_400 if is_top else ft.Colors.BLUE_400,
+                    delay / 1000
+                ))
+                anim_tasks.append(task)
             results_container.controls = rc
 
         if not records:
@@ -342,6 +389,183 @@ def main(page: ft.Page):
         history_container.update()
         ranking_container.update()
 
+    def refresh_analysis():
+        nonlocal analysis_container
+
+        if not records:
+            analysis_container.controls = [ft.Text("まだデータがありません", italic=True, color=ft.Colors.GREY)]
+            analysis_container.update()
+            return
+
+        items = [r["name"] for r in records]
+        total = len(records)
+        unique_items = len(set(items))
+        top_item = Counter(items).most_common(1)[0] if items else ("", 0)
+        locations = Counter(r["location"] for r in records).most_common(1)
+        top_loc = locations[0] if locations else ("", 0)
+
+        loc_counts = Counter(r["location"] for r in records).most_common(5)
+
+        weekday_item = defaultdict(lambda: Counter())
+        weekday_total = Counter()
+        for r in records:
+            d = r.get("lost_date", "") or r.get("found_date", "")[:10]
+            wd = parse_weekday(d)
+            if wd is not None:
+                weekday_total[wd] += 1
+                weekday_item[wd][r["name"]] += 1
+
+        has_weekday = bool(weekday_total)
+        best_wd = weekday_total.most_common(1)[0][0] if has_weekday else None
+
+        sections = []
+
+        sections.append(ft.Text("全体統計", size=18, weight=ft.FontWeight.BOLD))
+        sections.append(ft.Divider(height=8))
+        stats_cards = ft.ResponsiveRow([
+            ft.Card(ft.Container(
+                ft.Column([
+                    ft.Text("総記録数", size=12, color=ft.Colors.GREY_600),
+                    ft.Text(str(total), size=28, weight=ft.FontWeight.BOLD, color=ft.Colors.BLUE_700),
+                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2),
+                padding=15, alignment=ft.alignment.center,
+            ), col={"sm": 6, "md": 3}, margin=3),
+            ft.Card(ft.Container(
+                ft.Column([
+                    ft.Text("なくした物", size=12, color=ft.Colors.GREY_600),
+                    ft.Text(str(unique_items), size=28, weight=ft.FontWeight.BOLD, color=ft.Colors.GREEN_700),
+                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2),
+                padding=15, alignment=ft.alignment.center,
+            ), col={"sm": 6, "md": 3}, margin=3),
+            ft.Card(ft.Container(
+                ft.Column([
+                    ft.Text("最多なくし物", size=12, color=ft.Colors.GREY_600),
+                    ft.Text(top_item[0], size=18, weight=ft.FontWeight.BOLD),
+                    ft.Text(f"{top_item[1]}回", size=13, color=ft.Colors.GREY_600),
+                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2),
+                padding=15, alignment=ft.alignment.center,
+            ), col={"sm": 6, "md": 3}, margin=3),
+            ft.Card(ft.Container(
+                ft.Column([
+                    ft.Text("最多発見場所", size=12, color=ft.Colors.GREY_600),
+                    ft.Text(top_loc[0], size=18, weight=ft.FontWeight.BOLD),
+                    ft.Text(f"{top_loc[1]}回", size=13, color=ft.Colors.GREY_600),
+                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2),
+                padding=15, alignment=ft.alignment.center,
+            ), col={"sm": 6, "md": 3}, margin=3),
+        ])
+        sections.append(stats_cards)
+
+        if has_weekday:
+            sections.append(ft.Divider(height=16))
+            sections.append(ft.Text("なくしやすい曜日", size=18, weight=ft.FontWeight.BOLD))
+            sections.append(ft.Divider(height=8))
+
+            max_wd = max(c for _, c in weekday_total.most_common()) if weekday_total else 1
+            for wd_idx in range(7):
+                cnt = weekday_total.get(wd_idx, 0)
+                pct = cnt / total * 100
+                is_top_wd = wd_idx == best_wd
+                bar = ft.Container(
+                    height=14,
+                    bgcolor=ft.Colors.RED_400 if is_top_wd else ft.Colors.PURPLE_300,
+                    border_radius=7,
+                    animate=ft.Animation(ANIM_DURATION, ft.AnimationCurve.EASE_OUT),
+                )
+                items_on_day = weekday_item[wd_idx].most_common(3)
+                items_str = "  ".join(f"{n}({c})" for n, c in items_on_day) if items_on_day else "—"
+                pct_text = ft.Text(str(cnt), size=12, weight=ft.FontWeight.BOLD)
+                sections.append(ft.Column([
+                    ft.Row([
+                        ft.Text(f"{WEEKDAYS_JP[wd_idx]}", size=14, weight=(
+                            ft.FontWeight.BOLD if is_top_wd else ft.FontWeight.NORMAL), expand=True),
+                        pct_text,
+                    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                    ft.Stack([
+                        ft.Container(height=14, bgcolor=ft.Colors.GREY_200, border_radius=7),
+                        bar,
+                    ]),
+                    ft.Text(items_str, size=11, color=ft.Colors.GREY_600, italic=True),
+                ], spacing=2))
+                delay = wd_idx * 80
+                asyncio.ensure_future(animate_bar(
+                    bar, pct_text, pct,
+                    ft.Colors.RED_400 if is_top_wd else ft.Colors.PURPLE_300,
+                    delay / 1000
+                ))
+
+        sections.append(ft.Divider(height=16))
+        sections.append(ft.Text("アイテム × 場所 の相関", size=18, weight=ft.FontWeight.BOLD))
+        sections.append(ft.Text("アイテムごとによく見つかる場所 TOP3", size=12, color=ft.Colors.GREY, italic=True))
+        sections.append(ft.Divider(height=8))
+
+        item_locations = defaultdict(lambda: Counter())
+        for r in records:
+            item_locations[r["name"]][r["location"]] += 1
+
+        item_counts = Counter(items).most_common(10)
+        for name, cnt in item_counts:
+            top_locs = item_locations[name].most_common(3)
+            loc_chips = []
+            for loc, lc in top_locs:
+                loc_chips.append(ft.Container(
+                    content=ft.Text(f"{loc} ({lc}回)", size=12),
+                    padding=ft.Padding(8, 3, 8, 3),
+                    bgcolor=ft.Colors.GREEN_50,
+                    border_radius=8,
+                ))
+            sections.append(ft.Card(
+                ft.ListTile(
+                    title=ft.Text(name, weight=ft.FontWeight.W_500),
+                    subtitle=ft.Row(loc_chips, wrap=True, spacing=4) if loc_chips else ft.Text("データなし", size=12, color=ft.Colors.GREY),
+                    trailing=ft.Text(f"{cnt}回", size=13, color=ft.Colors.BLUE_700),
+                ),
+                margin=3,
+            ))
+
+        if has_weekday:
+            sections.append(ft.Divider(height=16))
+            sections.append(ft.Text("アイテム × 曜日 の相関", size=18, weight=ft.FontWeight.BOLD))
+            sections.append(ft.Text("アイテムをなくしやすい曜日の傾向", size=12, color=ft.Colors.GREY, italic=True))
+            sections.append(ft.Divider(height=8))
+
+            item_weekday = defaultdict(lambda: Counter())
+            for r in records:
+                d = r.get("lost_date", "") or r.get("found_date", "")[:10]
+                wd = parse_weekday(d)
+                if wd is not None:
+                    item_weekday[r["name"]][wd] += 1
+
+            for name, cnt in item_counts[:5]:
+                wd_counts = item_weekday[name]
+                if not wd_counts:
+                    continue
+                top_wd = wd_counts.most_common(1)[0]
+                wd_dots = []
+                for wd_idx in range(7):
+                    wc = wd_counts.get(wd_idx, 0)
+                    is_active = wc > 0
+                    is_best = wd_idx == top_wd[0]
+                    wd_dots.append(ft.Container(
+                        content=ft.Text(WEEKDAYS_JP[wd_idx][0], size=10, color=ft.Colors.WHITE if is_active else ft.Colors.GREY_400),
+                        width=28, height=28,
+                        bgcolor=ft.Colors.RED_400 if is_best else (ft.Colors.BLUE_300 if is_active else ft.Colors.GREY_200),
+                        border_radius=14,
+                        alignment=ft.alignment.center,
+                        tooltip=f"{WEEKDAYS_JP[wd_idx]}: {wc}回" if is_active else "",
+                    ))
+                sections.append(ft.Card(
+                    ft.ListTile(
+                        title=ft.Text(name, weight=ft.FontWeight.W_500),
+                        subtitle=ft.Row(wd_dots, spacing=4),
+                        trailing=ft.Text(f"{cnt}回", size=13, color=ft.Colors.BLUE_700),
+                    ),
+                    margin=3,
+                ))
+
+        analysis_container.controls = sections
+        analysis_container.update()
+
     search_dropdown.on_change = on_search_cat_change
     search_field.on_change = lambda e: setattr(search_field, 'value', e.control.value)
     name_field.on_change = lambda e: setattr(name_field, 'value', e.control.value)
@@ -380,19 +604,7 @@ def main(page: ft.Page):
 
     tab_ranking = ft.Column([ranking_container], scroll=ft.ScrollMode.AUTO, spacing=12)
 
-    empty_content = ft.Container(
-        padding=40,
-        content=ft.Column([
-            ft.Text("\U0001F50D", size=64),
-            ft.Text("まだ記録がありません", size=20, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_700),
-            ft.Container(height=8),
-            ft.Text("\U0001F4DD 使い方", size=16, weight=ft.FontWeight.W_500),
-            ft.Container(height=4),
-            ft.Text("① 「記録」タブでなくした物と見つかった場所を登録", size=14, color=ft.Colors.GREY_600),
-            ft.Text("② 同じ物をまたなくしたら「探す」タブで検索", size=14, color=ft.Colors.GREY_600),
-            ft.Text("③ 過去のデータから最もありそうな場所を予測表示", size=14, color=ft.Colors.GREY_600),
-        ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=4),
-    )
+    tab_analysis = ft.Column([analysis_container], scroll=ft.ScrollMode.AUTO, spacing=12)
 
     root_tabs = ft.Tabs(
         selected_index=0,
@@ -412,6 +624,11 @@ def main(page: ft.Page):
                 text="ランキング",
                 icon=ft.Icons.EMOJI_EVENTS,
                 content=ft.Container(content=tab_ranking, padding=10),
+            ),
+            ft.Tab(
+                text="分析",
+                icon=ft.Icons.ANALYTICS,
+                content=ft.Container(content=tab_analysis, padding=10),
             ),
         ],
         expand=True,
