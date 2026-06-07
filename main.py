@@ -112,12 +112,15 @@ def main(page: ft.Page):
         search_val = name
         search_ref.current.value = name
         results = do_search(name)
-        tabs.selected_index = 0
-        tabs.update()
+        nav_bar.selected_index = 0
+        nav_bar.update()
+        view_stack.controls = [views[0]]
+        view_stack.update()
         refresh()
 
-    def on_tab_change(e):
-        idx = int(e.data)
+    def show_page(idx):
+        view_stack.controls = [views[idx]]
+        view_stack.update()
         if idx == 3:
             refresh_analysis()
 
@@ -405,13 +408,20 @@ def main(page: ft.Page):
                     on_click=lambda e, i=idx: delete_record(i),
                 ))
                 hc.append(
-                    ft.Card(
-                        ft.ListTile(
-                            title=ft.Text(r["name"], weight=ft.FontWeight.W_500),
-                            subtitle=ft.Text(subtitle, size=13),
-                            trailing=ft.Row(trailing_btns, spacing=0),
+                    ft.Dismissible(
+                        content=ft.Card(
+                            ft.ListTile(
+                                title=ft.Text(r["name"], weight=ft.FontWeight.W_500),
+                                subtitle=ft.Text(subtitle, size=13),
+                                trailing=ft.Row(trailing_btns, spacing=0),
+                            ),
+                            margin=3, elevation=2,
                         ),
-                        margin=3,
+                        background=ft.Container(bgcolor=ft.Colors.RED_400,
+                            content=ft.Row([ft.Text("削除", color=ft.Colors.WHITE, weight=ft.FontWeight.BOLD)], alignment=ft.MainAxisAlignment.END),
+                            padding=ft.padding.only(right=20), alignment=ft.Alignment.CENTER_RIGHT),
+                        dismiss_direction=ft.DismissDirection.END_TO_START,
+                        on_dismiss=lambda e, i=idx: delete_record(i),
                     )
                 )
             history_container.controls = hc
@@ -445,7 +455,7 @@ def main(page: ft.Page):
                                 on_click=lambda e, n=name: search_from_history(n),
                             ),
                         ),
-                        margin=3,
+                        margin=3, elevation=2,
                     )
                 )
             ranking_container.controls = rc
@@ -680,7 +690,7 @@ def main(page: ft.Page):
                     subtitle=ft.Row(loc_chips, wrap=True, spacing=4) if loc_chips else ft.Text("データなし", size=12, color=ft.Colors.GREY),
                     trailing=ft.Text(f"{cnt}回", size=13, color=ft.Colors.BLUE_700),
                 ),
-                margin=3,
+                margin=3, elevation=2,
             ))
 
         if has_weekday:
@@ -720,7 +730,7 @@ def main(page: ft.Page):
                         subtitle=ft.Row(wd_dots, spacing=4),
                         trailing=ft.Text(f"{cnt}回", size=13, color=ft.Colors.BLUE_700),
                     ),
-                    margin=3,
+                    margin=3, elevation=2,
                 ))
 
         sections.append(ft.Divider(height=16))
@@ -1029,25 +1039,18 @@ def main(page: ft.Page):
         analysis_container,
     ], scroll=ft.ScrollMode.AUTO, spacing=12)
 
-    tabs = ft.Tabs(
+    views = [search_view, record_view, ranking_view, analysis_view]
+    view_stack = ft.Column(controls=[views[0]], expand=True)
+
+    nav_bar = ft.NavigationBar(
         selected_index=0,
-        length=4,
-        expand=True,
-        on_change=on_tab_change,
-        content=ft.Column([
-            ft.TabBar(
-                tabs=[
-                    ft.Tab(label="探す", icon=ft.Icons.SEARCH),
-                    ft.Tab(label="記録", icon=ft.Icons.ADD_CIRCLE_OUTLINE),
-                    ft.Tab(label="ランキング", icon=ft.Icons.EMOJI_EVENTS),
-                    ft.Tab(label="分析", icon=ft.Icons.ANALYTICS),
-                ],
-            ),
-            ft.TabBarView(
-                expand=True,
-                controls=[search_view, record_view, ranking_view, analysis_view],
-            ),
-        ]),
+        destinations=[
+            ft.NavigationDestination(icon=ft.Icons.SEARCH, label="探す"),
+            ft.NavigationDestination(icon=ft.Icons.ADD_CIRCLE_OUTLINE, label="記録"),
+            ft.NavigationDestination(icon=ft.Icons.EMOJI_EVENTS, label="ランキング"),
+            ft.NavigationDestination(icon=ft.Icons.ANALYTICS, label="分析"),
+        ],
+        on_change=lambda e: show_page(int(e.data)),
     )
 
     page.appbar = ft.AppBar(
@@ -1064,7 +1067,7 @@ def main(page: ft.Page):
     )
 
     page.overlay.append(date_picker)
-    page.add(ft.SafeArea(tabs))
+    page.add(ft.SafeArea(ft.Column([view_stack, nav_bar], spacing=0, expand=True)))
 
     page.update()
     load_from_storage()
