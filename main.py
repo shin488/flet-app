@@ -817,25 +817,21 @@ def main(page: ft.Page):
         on_select=on_search_cat_change,
     )
 
-    search_view = ft.Container(
-        content=ft.Column([
-            ft.Text("🍃 焦らず、ゆっくり思い出しましょう", size=13, color=ft.Colors.TEAL_700, italic=True),
-            ft.Text("なくしものを探す", size=22, weight=ft.FontWeight.BOLD),
-            ft.Divider(height=8),
-            search_dropdown,
-            ft.Row([
-                ft.TextField(ref=search_ref, label="なくした物は？", hint_text="例: 財布、鍵、スマホ", expand=True),
-                ft.Button("探す", on_click=on_search_click, icon=ft.Icons.SEARCH),
-            ]),
-            chips_container,
-            ft.Divider(height=8),
-            results_container,
-            ft.Divider(height=8),
-            simulation_container,
-        ], scroll=ft.ScrollMode.AUTO, spacing=12),
-        bgcolor=ft.Colors.with_opacity(0.75, ft.Colors.WHITE),
-        padding=12, border_radius=12, expand=True,
-    )
+    search_view = ft.Column([
+        ft.Text("🍃 焦らず、ゆっくり思い出しましょう", size=13, color=ft.Colors.TEAL_700, italic=True),
+        ft.Text("なくしものを探す", size=22, weight=ft.FontWeight.BOLD),
+        ft.Divider(height=8),
+        search_dropdown,
+        ft.Row([
+            ft.TextField(ref=search_ref, label="なくした物は？", hint_text="例: 財布、鍵、スマホ", expand=True),
+            ft.Button("探す", on_click=on_search_click, icon=ft.Icons.SEARCH),
+        ]),
+        chips_container,
+        ft.Divider(height=8),
+        results_container,
+        ft.Divider(height=8),
+        simulation_container,
+    ], scroll=ft.ScrollMode.AUTO, spacing=12)
 
     def on_date_selected(e):
         val = e.control.value
@@ -853,57 +849,45 @@ def main(page: ft.Page):
         date_picker.open = True
         date_picker.update()
 
-    record_view = ft.Container(
-        content=ft.Column([
-            ft.Text("🌱 見つけたらすぐに記録しましょう", size=13, color=ft.Colors.TEAL_700, italic=True),
-            ft.Text("新しい記録", size=22, weight=ft.FontWeight.BOLD),
-            ft.Divider(height=8),
-            ft.TextField(ref=name_ref, label="なくした物", hint_text="例: 鍵、スマホ、財布", width=300),
-            ft.Dropdown(
-                ref=category_ref,
-                label="カテゴリ",
-                options=([ft.dropdown.Option("", "選択してください")] + [ft.dropdown.Option(c) for c in CATEGORIES]),
+    record_view = ft.Column([
+        ft.Text("🌱 見つけたらすぐに記録しましょう", size=13, color=ft.Colors.TEAL_700, italic=True),
+        ft.Text("新しい記録", size=22, weight=ft.FontWeight.BOLD),
+        ft.Divider(height=8),
+        ft.TextField(ref=name_ref, label="なくした物", hint_text="例: 鍵、スマホ、財布", width=300),
+        ft.Dropdown(
+            ref=category_ref,
+            label="カテゴリ",
+            options=([ft.dropdown.Option("", "選択してください")] + [ft.dropdown.Option(c) for c in CATEGORIES]),
+            width=300,
+        ),
+        ft.Row([
+            ft.TextField(
+                ref=date_ref,
+                label="なくした日 (任意)",
+                hint_text="タップしてカレンダーから選択",
+                value=datetime.now().strftime("%Y-%m-%d"),
                 width=300,
+                read_only=True,
+                on_focus=lambda _: open_date_picker(),
+                suffix=ft.IconButton(ft.Icons.CALENDAR_MONTH, on_click=lambda _: open_date_picker()),
             ),
+        ]),
+        ft.TextField(ref=location_ref, label="見つかった場所", hint_text="例: ソファの隙間", width=300),
+        ft.Button("記録する", on_click=on_add_record, icon=ft.Icons.ADD),
+        ft.Divider(height=16),
+        ft.Row([
+            ft.Text("記録履歴", size=16, weight=ft.FontWeight.BOLD),
             ft.Row([
-                ft.TextField(
-                    ref=date_ref,
-                    label="なくした日 (任意)",
-                    hint_text="タップしてカレンダーから選択",
-                    value=datetime.now().strftime("%Y-%m-%d"),
-                    width=300,
-                    read_only=True,
-                    on_focus=lambda _: open_date_picker(),
-                    suffix=ft.IconButton(ft.Icons.CALENDAR_MONTH, on_click=lambda _: open_date_picker()),
-                ),
+                ft.TextButton("エクスポート", on_click=show_export_dialog),
+                ft.TextButton("インポート", on_click=show_import_dialog),
             ]),
-            ft.TextField(ref=location_ref, label="見つかった場所", hint_text="例: ソファの隙間", width=300),
-            ft.Button("記録する", on_click=on_add_record, icon=ft.Icons.ADD),
-            ft.Divider(height=16),
-            ft.Row([
-                ft.Text("記録履歴", size=16, weight=ft.FontWeight.BOLD),
-                ft.Row([
-                    ft.TextButton("エクスポート", on_click=show_export_dialog),
-                    ft.TextButton("インポート", on_click=show_import_dialog),
-                ]),
-            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-            history_container,
-        ], scroll=ft.ScrollMode.AUTO, spacing=12),
-        bgcolor=ft.Colors.with_opacity(0.75, ft.Colors.WHITE),
-        padding=12, border_radius=12, expand=True,
-    )
+        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+        history_container,
+    ], scroll=ft.ScrollMode.AUTO, spacing=12)
 
-    ranking_view = ft.Container(
-        content=ft.Column([ranking_container], scroll=ft.ScrollMode.AUTO, spacing=12),
-        bgcolor=ft.Colors.with_opacity(0.75, ft.Colors.WHITE),
-        padding=12, border_radius=12, expand=True,
-    )
+    ranking_view = ft.Column([ranking_container], scroll=ft.ScrollMode.AUTO, spacing=12)
 
-    analysis_view = ft.Container(
-        content=ft.Column([analysis_progress, analysis_container], scroll=ft.ScrollMode.AUTO, spacing=12),
-        bgcolor=ft.Colors.with_opacity(0.75, ft.Colors.WHITE),
-        padding=12, border_radius=12, expand=True,
-    )
+    analysis_view = ft.Column([analysis_progress, analysis_container], scroll=ft.ScrollMode.AUTO, spacing=12)
 
     tabs = ft.Tabs(
         selected_index=0,
@@ -941,11 +925,11 @@ def main(page: ft.Page):
     )
 
     page.overlay.append(date_picker)
-    page.add(ft.Container(
-        content=ft.SafeArea(tabs),
-        expand=True,
-        image=ft.DecorationImage(src=BG_IMAGE, opacity=0.5, fit=ft.BoxFit.COVER),
-    ))
+    page.add(ft.Stack([
+        ft.Container(expand=True, image=ft.DecorationImage(src=BG_IMAGE, opacity=0.5, fit=ft.BoxFit.COVER)),
+        ft.Container(content=ft.SafeArea(tabs), expand=True,
+                      bgcolor=ft.Colors.with_opacity(0.65, ft.Colors.WHITE)),
+    ]))
 
     page.update()
     load_from_storage()
