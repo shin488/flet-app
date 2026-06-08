@@ -51,8 +51,8 @@ def main(page: ft.Page):
             primary_container=ft.Colors.TEAL_100,
             secondary=ft.Colors.BROWN_700,
             secondary_container=ft.Colors.AMBER_50,
-            surface=ft.Colors.with_opacity(0.7, ft.Colors.WHITE),
-            surface_container=ft.Colors.with_opacity(0.5, ft.Colors.AMBER_50),
+            surface=ft.Colors.WHITE,
+            surface_container=ft.Colors.AMBER_50,
         ),
         use_material3=True,
     )
@@ -925,11 +925,10 @@ def main(page: ft.Page):
     )
 
     page.overlay.append(date_picker)
-    page.add(ft.Container(
-        content=ft.SafeArea(tabs),
-        expand=True,
-        image=ft.DecorationImage(src=BG_IMAGE, opacity=0.6, fit=ft.BoxFit.COVER),
-    ))
+    page.add(ft.Stack([
+        ft.Container(expand=True, image=ft.DecorationImage(src=BG_IMAGE, opacity=0.6, fit=ft.BoxFit.COVER)),
+        ft.SafeArea(tabs),
+    ], expand=True))
 
     page.update()
     load_from_storage()
