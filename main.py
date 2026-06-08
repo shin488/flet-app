@@ -51,8 +51,8 @@ def main(page: ft.Page):
             primary_container=ft.Colors.TEAL_100,
             secondary=ft.Colors.BROWN_700,
             secondary_container=ft.Colors.AMBER_50,
-            surface=ft.Colors.WHITE,
-            surface_container=ft.Colors.AMBER_50,
+            surface=ft.Colors.with_opacity(0.7, ft.Colors.WHITE),
+            surface_container=ft.Colors.with_opacity(0.5, ft.Colors.AMBER_50),
         ),
         use_material3=True,
     )
@@ -347,7 +347,7 @@ def main(page: ft.Page):
                         ft.Text(f"{cnt}件", size=11, color=ft.Colors.GREY_600),
                     ], spacing=3),
                     padding=10,
-                    bgcolor=ft.Colors.AMBER_50 if is_top else ft.Colors.WHITE,
+                    bgcolor=ft.Colors.with_opacity(0.8, ft.Colors.AMBER_50) if is_top else ft.Colors.with_opacity(0.8, ft.Colors.WHITE),
                     border=ft.Border.all(1, ft.Colors.TEAL_300 if is_top else ft.Colors.AMBER_100),
                     border_radius=8,
                 )
@@ -378,7 +378,7 @@ def main(page: ft.Page):
                             make_bar(pct, ft.Colors.BROWN_300 if is_top else ft.Colors.ORANGE_100),
                         ], spacing=3),
                         padding=10,
-                        bgcolor=ft.Colors.ORANGE_50 if is_top else ft.Colors.WHITE,
+                        bgcolor=ft.Colors.with_opacity(0.8, ft.Colors.ORANGE_50) if is_top else ft.Colors.with_opacity(0.8, ft.Colors.WHITE),
                         border=ft.Border.all(1, ft.Colors.BROWN_200 if is_top else ft.Colors.AMBER_100),
                         border_radius=8,
                     )
@@ -677,7 +677,7 @@ def main(page: ft.Page):
                     ft.Text(str(resolved_total), size=22, weight=ft.FontWeight.BOLD, color=ft.Colors.TEAL_700),
                 ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=1),
                 padding=10, border_radius=8,
-                bgcolor=ft.Colors.AMBER_50, expand=True, border=ft.Border.all(1, ft.Colors.ORANGE_100),
+                bgcolor=ft.Colors.with_opacity(0.8, ft.Colors.AMBER_50), expand=True, border=ft.Border.all(1, ft.Colors.ORANGE_100),
             ),
             ft.Container(
                 ft.Column([
@@ -685,7 +685,7 @@ def main(page: ft.Page):
                     ft.Text(str(unresolved_total), size=22, weight=ft.FontWeight.BOLD, color=ft.Colors.BROWN_700),
                 ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=1),
                 padding=10, border_radius=8,
-                bgcolor=ft.Colors.ORANGE_50, expand=True, border=ft.Border.all(1, ft.Colors.BROWN_200),
+                bgcolor=ft.Colors.with_opacity(0.8, ft.Colors.ORANGE_50), expand=True, border=ft.Border.all(1, ft.Colors.BROWN_200),
             ),
             ft.Container(
                 ft.Column([
@@ -693,7 +693,7 @@ def main(page: ft.Page):
                     ft.Text(f"{resolved_pct:.0f}%", size=22, weight=ft.FontWeight.BOLD, color=ft.Colors.TEAL_800),
                 ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=1),
                 padding=10, border_radius=8,
-                bgcolor=ft.Colors.AMBER_50, expand=True, border=ft.Border.all(1, ft.Colors.ORANGE_100),
+                bgcolor=ft.Colors.with_opacity(0.8, ft.Colors.AMBER_50), expand=True, border=ft.Border.all(1, ft.Colors.ORANGE_100),
             ),
         ], spacing=6))
         sections.append(make_bar(resolved_pct, ft.Colors.TEAL_600))
@@ -726,7 +726,7 @@ def main(page: ft.Page):
                         ft.Text(f"{min_h/24:.1f}日" if min_h >= 24 else f"{min_h:.0f}時間",
                                 size=14, weight=ft.FontWeight.BOLD, color=ft.Colors.TEAL_700),
                     ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=0),
-                    padding=8, border_radius=8, bgcolor=ft.Colors.AMBER_50, expand=True,
+                    padding=8, border_radius=8, bgcolor=ft.Colors.with_opacity(0.8, ft.Colors.AMBER_50), expand=True,
                 ),
                 ft.Container(
                     ft.Column([
@@ -925,11 +925,11 @@ def main(page: ft.Page):
     )
 
     page.overlay.append(date_picker)
-    page.add(ft.Stack([
-        ft.Container(expand=True, image=ft.DecorationImage(src=BG_IMAGE, opacity=0.5, fit=ft.BoxFit.COVER)),
-        ft.Container(content=ft.SafeArea(tabs), expand=True,
-                      bgcolor=ft.Colors.with_opacity(0.65, ft.Colors.WHITE)),
-    ]))
+    page.add(ft.Container(
+        content=ft.SafeArea(tabs),
+        expand=True,
+        image=ft.DecorationImage(src=BG_IMAGE, opacity=0.6, fit=ft.BoxFit.COVER),
+    ))
 
     page.update()
     load_from_storage()
