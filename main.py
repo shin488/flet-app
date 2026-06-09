@@ -831,7 +831,7 @@ def main(page: ft.Page):
         results_container,
         ft.Divider(height=8),
         simulation_container,
-    ], scroll=ft.ScrollMode.AUTO, spacing=12)
+    ], expand=True, scroll=ft.ScrollMode.AUTO, spacing=12)
 
     def on_date_selected(e):
         val = e.control.value
@@ -883,23 +883,35 @@ def main(page: ft.Page):
             ]),
         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
         history_container,
-    ], scroll=ft.ScrollMode.AUTO, spacing=12)
+    ], expand=True, scroll=ft.ScrollMode.AUTO, spacing=12)
 
-    ranking_view = ft.Column([ranking_container], scroll=ft.ScrollMode.AUTO, spacing=12)
+    ranking_view = ft.Column([ranking_container], expand=True, scroll=ft.ScrollMode.AUTO, spacing=12)
 
-    analysis_view = ft.Column([analysis_progress, analysis_container], scroll=ft.ScrollMode.AUTO, spacing=12)
+    analysis_view = ft.Column([analysis_progress, analysis_container], expand=True, scroll=ft.ScrollMode.AUTO, spacing=12)
 
     tabs = ft.Tabs(
         selected_index=0,
+        length=4,
         expand=True,
-        indicator_color=ft.Colors.TEAL_800,
         on_change=on_tab_change,
-        tabs=[
-            ft.Tab(text="探す", icon=ft.Icons.SEARCH, content=search_view),
-            ft.Tab(text="記録", icon=ft.Icons.ADD_CIRCLE_OUTLINE, content=record_view),
-            ft.Tab(text="ランキング", icon=ft.Icons.EMOJI_EVENTS, content=ranking_view),
-            ft.Tab(text="分析", icon=ft.Icons.ANALYTICS, content=analysis_view),
-        ],
+        content=ft.Column(
+            expand=True,
+            controls=[
+                ft.TabBar(
+                    tabs=[
+                        ft.Tab(label="探す", icon=ft.Icons.SEARCH),
+                        ft.Tab(label="記録", icon=ft.Icons.ADD_CIRCLE_OUTLINE),
+                        ft.Tab(label="ランキング", icon=ft.Icons.EMOJI_EVENTS),
+                        ft.Tab(label="分析", icon=ft.Icons.ANALYTICS),
+                    ],
+                    indicator_color=ft.Colors.TEAL_800,
+                ),
+                ft.TabBarView(
+                    expand=True,
+                    controls=[search_view, record_view, ranking_view, analysis_view],
+                ),
+            ],
+        ),
     )
 
     page.appbar = ft.AppBar(
