@@ -57,7 +57,6 @@ def main(page: ft.Page):
         use_material3=True,
     )
 
-    page.scroll = ft.ScrollMode.AUTO
     records = []
     search_val = ""
     search_cat = ""
@@ -128,7 +127,7 @@ def main(page: ft.Page):
         search_val = name
         search_ref.current.value = name
         results = do_search(name)
-        on_tab_click(0)
+        tabs.selected_index = 0
         refresh()
 
 
@@ -885,38 +884,20 @@ def main(page: ft.Page):
 
     analysis_view = ft.Column([analysis_progress, analysis_container], expand=True, scroll=ft.ScrollMode.AUTO, spacing=12)
 
-    tab_index = 0
-    TAB_NAMES = ["探す", "記録", "ランキング", "分析"]
-    TAB_ICONS = [ft.Icons.SEARCH, ft.Icons.ADD_CIRCLE_OUTLINE, ft.Icons.EMOJI_EVENTS, ft.Icons.ANALYTICS]
-    tab_views = [search_view, record_view, ranking_view, analysis_view]
-
-    def make_tab(i):
-        selected = i == tab_index
-        return ft.Container(
-            content=ft.Row([
-                ft.Icon(TAB_ICONS[i], size=18, color=ft.Colors.WHITE if selected else ft.Colors.TEAL_800),
-                ft.Text(TAB_NAMES[i], size=14, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE if selected else ft.Colors.TEAL_800),
-            ], tight=True, spacing=4),
-            padding=ft.Padding.symmetric(vertical=10, horizontal=12),
-            bgcolor=ft.Colors.TEAL_800 if selected else ft.Colors.with_opacity(0.15, ft.Colors.TEAL_800),
-            border_radius=ft.BorderRadius.only(top_left=8, top_right=8) if selected else 8,
-            ink=True,
-            on_click=lambda e, idx=i: on_tab_click(idx),
-        )
-
-    tab_row = ft.Row([make_tab(i) for i in range(4)], spacing=2)
-
-    def on_tab_click(idx):
-        nonlocal tab_index
-        tab_index = idx
-        content_area.content = tab_views[idx]
-        tab_row.controls = [make_tab(i) for i in range(4)]
-        tab_row.update()
-        content_area.update()
-        if idx == 3:
-            refresh_analysis()
-
-    content_area = ft.Container(expand=True, content=search_view)
+    tabs = ft.Tabs(
+        selected_index=0,
+        tabs=[
+            ft.Tab(text="探す", icon=ft.Icons.SEARCH, content=search_view),
+            ft.Tab(text="記録", icon=ft.Icons.EDIT_NOTE, content=record_view),
+            ft.Tab(text="ランキング", icon=ft.Icons.EMOJI_EVENTS, content=ranking_view),
+            ft.Tab(text="分析", icon=ft.Icons.ANALYTICS, content=analysis_view),
+        ],
+        expand=True,
+        indicator_color=ft.Colors.TEAL_600,
+        label_color=ft.Colors.TEAL_800,
+        unselected_label_color=ft.Colors.GREY_600,
+        on_change=lambda e: refresh_analysis() if e.control.selected_index == 3 else None,
+    )
 
     page.appbar = ft.AppBar(
         title=ft.Row([ft.Text("🏔 ", size=22), ft.Text("なくしもの探知機", weight=ft.FontWeight.BOLD)], tight=True),
@@ -937,10 +918,7 @@ def main(page: ft.Page):
         image=ft.DecorationImage(src=BG_IMAGE, opacity=1.0, fit=ft.BoxFit.COVER),
         content=ft.SafeArea(
             expand=True,
-            content=ft.Column([
-                tab_row,
-                content_area,
-            ], expand=True, spacing=0),
+            content=tabs,
         ),
     ))
 
