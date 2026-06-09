@@ -891,24 +891,15 @@ def main(page: ft.Page):
 
     tabs = ft.Tabs(
         selected_index=0,
-        length=4,
         expand=True,
+        indicator_color=ft.Colors.TEAL_800,
         on_change=on_tab_change,
-        content=ft.Column([
-            ft.TabBar(
-                tabs=[
-                    ft.Tab(label="探す", icon=ft.Icons.SEARCH),
-                    ft.Tab(label="記録", icon=ft.Icons.ADD_CIRCLE_OUTLINE),
-                    ft.Tab(label="ランキング", icon=ft.Icons.EMOJI_EVENTS),
-                    ft.Tab(label="分析", icon=ft.Icons.ANALYTICS),
-                ],
-                indicator_color=ft.Colors.TEAL_800,
-            ),
-            ft.TabBarView(
-                expand=True,
-                controls=[search_view, record_view, ranking_view, analysis_view],
-            ),
-        ]),
+        tabs=[
+            ft.Tab(text="探す", icon=ft.Icons.SEARCH, content=search_view),
+            ft.Tab(text="記録", icon=ft.Icons.ADD_CIRCLE_OUTLINE, content=record_view),
+            ft.Tab(text="ランキング", icon=ft.Icons.EMOJI_EVENTS, content=ranking_view),
+            ft.Tab(text="分析", icon=ft.Icons.ANALYTICS, content=analysis_view),
+        ],
     )
 
     page.appbar = ft.AppBar(
