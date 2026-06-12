@@ -141,6 +141,12 @@ def main(page: ft.Page):
     records = []
     categories = load_categories()
     floorplan = load_floorplan()
+    for cell in floorplan.get("cells", []):
+        if "spots" in cell and "furniture" not in cell:
+            old = cell.pop("spots", "")
+            cell["furniture"] = [{"name": "その他", "spots": [s.strip() for s in old.split(",") if s.strip()]}] if old.strip() else []
+        cell.setdefault("furniture", [])
+    save_floorplan(floorplan)
     search_val = ""
     search_cat = ""
     results = None
@@ -328,10 +334,19 @@ def main(page: ft.Page):
             e.page.show_snack_bar(ft.SnackBar(
                 content=ft.Text("「見つかった場所」を入力してください"), bgcolor=ft.Colors.RED_400))
             return
+        parts = location.split(" > ")
+        location_parts = {}
+        if len(parts) >= 1:
+            location_parts["room"] = parts[0]
+        if len(parts) >= 2:
+            location_parts["furniture"] = parts[1]
+        if len(parts) >= 3:
+            location_parts["spot"] = parts[2]
         rec = {
             "name": name,
             "category": category_ref.current.value or "その他",
             "location": location,
+            "location_parts": location_parts,
             "lost_date": (date_ref.current.value or "").strip() or datetime.now().strftime("%Y-%m-%d"),
             "found_date": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "resolved": False,
@@ -1069,6 +1084,51 @@ def main(page: ft.Page):
                     make_bar(pct, ft.Colors.TEAL_300),
                 ], spacing=1))
 
+        loc_rooms = Counter()
+        loc_furniture = Counter()
+        loc_combos = Counter()
+        loc_len = 0
+        for r in records:
+            lp = r.get("location_parts", {}) or {}
+            if lp.get("room"):
+                loc_rooms[lp["room"]] += 1
+                loc_len += 1
+                if lp.get("furniture"):
+                    key = f"{lp['room']} > {lp['furniture']}"
+                    loc_furniture[key] += 1
+                    if lp.get("spot"):
+                        loc_combos[f"{key} > {lp['spot']}"] += 1
+
+        if loc_rooms:
+            sections.append(ft.Divider(height=16))
+            sections.append(ft.Text("スポット分析", size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.TEAL_800))
+            sections.append(ft.Divider(height=8))
+            sections.append(ft.Text("部屋別", size=14, weight=ft.FontWeight.BOLD, color=ft.Colors.TEAL_700))
+            for room, cnt in loc_rooms.most_common(5):
+                pct = cnt / loc_len * 100
+                sections.append(ft.Row([
+                    ft.Container(ft.Text(room, size=12, expand=True), expand=True),
+                    ft.Container(ft.Text(f"{cnt}件 {pct:.0f}%", size=11, color=ft.Colors.GREY_600)),
+                ]))
+            if loc_furniture:
+                sections.append(ft.Divider(height=4))
+                sections.append(ft.Text("家具別（部屋 > 家具）", size=14, weight=ft.FontWeight.BOLD, color=ft.Colors.TEAL_700))
+                for loc, cnt in loc_furniture.most_common(5):
+                    pct = cnt / loc_len * 100
+                    sections.append(ft.Row([
+                        ft.Container(ft.Text(loc, size=12, expand=True, no_wrap=False), expand=True),
+                        ft.Container(ft.Text(f"{cnt}件 {pct:.0f}%", size=11, color=ft.Colors.GREY_600)),
+                    ]))
+            if loc_combos:
+                sections.append(ft.Divider(height=4))
+                sections.append(ft.Text("ピンポイント（部屋 > 家具 > スポット）", size=14, weight=ft.FontWeight.BOLD, color=ft.Colors.TEAL_700))
+                for loc, cnt in loc_combos.most_common(5):
+                    pct = cnt / loc_len * 100
+                    sections.append(ft.Row([
+                        ft.Container(ft.Text(loc, size=11, expand=True, no_wrap=False), expand=True),
+                        ft.Container(ft.Text(f"{cnt}件 {pct:.0f}%", size=10, color=ft.Colors.GREY_600)),
+                    ]))
+
         analysis_container.controls = sections
         analysis_progress.visible = False
         page.update()
@@ -1118,11 +1178,14 @@ def main(page: ft.Page):
             for c in range(cols):
                 cell = cell_map.get((r, c))
                 label = cell["room"] if cell else ""
-                spots = cell.get("spots", "") if cell else ""
                 inner = [ft.Text(label, size=12, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER)]
-                if spots:
-                    items_str = ", ".join(s.strip() for s in spots.split(",")[:3])
-                    inner.append(ft.Text(items_str, size=8, color=ft.Colors.GREY_600, text_align=ft.TextAlign.CENTER, no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS))
+                if cell:
+                    furn_names = [f["name"] for f in cell.get("furniture", [])]
+                    if furn_names:
+                        display = ", ".join(furn_names[:3])
+                        if len(furn_names) > 3:
+                            display += "…"
+                        inner.append(ft.Text(display, size=8, color=ft.Colors.GREY_600, text_align=ft.TextAlign.CENTER, no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS))
                 cont = ft.Container(
                     content=ft.Column(inner, horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=1, tight=True),
                     width=80, height=60,
@@ -1141,18 +1204,135 @@ def main(page: ft.Page):
         cell_map = {(c["r"], c["c"]): c for c in floorplan.get("cells", [])}
         existing = cell_map.get((r, c))
         room_input = ft.TextField(label="部屋名", hint_text="例: リビング", value=existing["room"] if existing else "", width=250)
-        spots_input = ft.TextField(label="スポット（カンマ区切り）", hint_text="例: ソファの隙間, テーブルの下", value=existing.get("spots", "") if existing else "", width=250)
+        furniture_list = ft.Column(spacing=4)
+
+        def rebuild_furniture_ui():
+            cell = cell_map.get((r, c))
+            if not cell:
+                furniture_list.controls = [ft.Text("先に部屋名を入力して保存してください", size=12, color=ft.Colors.GREY_500, italic=True)]
+            else:
+                items = []
+                for fi, furn in enumerate(cell.get("furniture", [])):
+                    spot_chips = []
+                    for si, spot in enumerate(furn.get("spots", [])):
+                        chip = ft.Container(
+                            content=ft.Row([
+                                ft.Text(spot, size=11),
+                                ft.Text("✕", size=10, color=ft.Colors.RED_400),
+                            ], spacing=2),
+                            padding=ft.padding.only(left=8, right=6, top=4, bottom=4),
+                            bgcolor=ft.Colors.AMBER_100,
+                            border_radius=8,
+                            on_click=lambda e, f=fi, s=si: delete_spot(f, s),
+                            ink=True,
+                        )
+                        spot_chips.append(chip)
+                    items.append(ft.Container(
+                        content=ft.Column([
+                            ft.Row([
+                                ft.Text(furn["name"], size=14, weight=ft.FontWeight.BOLD, expand=True),
+                                ft.TextButton("＋スポット",
+                                    on_click=lambda e, fn=furn["name"]: add_spot_dialog(fn)),
+                                ft.TextButton("削除",
+                                    on_click=lambda e, f=fi: delete_furniture(f),
+                                    style=ft.ButtonStyle(color=ft.Colors.RED_400)),
+                            ]),
+                            ft.Row(spot_chips, wrap=True, spacing=4) if spot_chips
+                            else ft.Text("スポット未設定", size=11, color=ft.Colors.GREY_500, italic=True),
+                        ], spacing=2),
+                        padding=8,
+                        bgcolor=ft.Colors.with_opacity(0.8, ft.Colors.AMBER_50),
+                        border=ft.Border.all(1, ft.Colors.AMBER_200),
+                        border_radius=6,
+                    ))
+                if not items:
+                    items.append(ft.Text("家具がありません。「＋家具を追加」してください", size=12, color=ft.Colors.GREY_500, italic=True))
+                furniture_list.controls = items
+            furniture_list.update()
+
+        def find_cell():
+            return cell_map.get((r, c))
+
+        def delete_furniture(fi):
+            cell = find_cell()
+            if cell and fi < len(cell.get("furniture", [])):
+                cell["furniture"].pop(fi)
+                save_floorplan(floorplan)
+                rebuild_furniture_ui()
+
+        def delete_spot(fi, si):
+            cell = find_cell()
+            if cell and fi < len(cell.get("furniture", [])):
+                spots = cell["furniture"][fi].get("spots", [])
+                if si < len(spots):
+                    spots.pop(si)
+                    save_floorplan(floorplan)
+                    rebuild_furniture_ui()
+
+        def add_furniture_dialog(ev):
+            furn_input = ft.TextField(label="家具名", hint_text="例: ソファ, 机, 本棚", width=250)
+            def confirm(ev2):
+                name = furn_input.value.strip()
+                if not name:
+                    ev2.page.show_snack_bar(ft.SnackBar(content=ft.Text("家具名を入力してください")))
+                    return
+                cell = find_cell()
+                if not cell:
+                    floorplan["cells"].append({"r": r, "c": c, "room": room_input.value.strip() or "部屋", "furniture": []})
+                    cell = cell_map.get((r, c))
+                cell.setdefault("furniture", []).append({"name": name, "spots": []})
+                save_floorplan(floorplan)
+                sub_dlg.open = False
+                sub_dlg.update()
+                rebuild_furniture_ui()
+            sub_dlg = ft.AlertDialog(
+                modal=True, title=ft.Text("家具を追加"),
+                content=furn_input,
+                actions=[
+                    ft.TextButton("キャンセル", on_click=lambda e: setattr(sub_dlg, 'open', False) or sub_dlg.update()),
+                    ft.FilledButton("追加", on_click=confirm),
+                ],
+            )
+            page.show_dialog(sub_dlg)
+
+        def add_spot_dialog(furn_name):
+            spot_input = ft.TextField(label="スポット名", hint_text="例: 隙間, 天板, 引き出し", width=250)
+            def confirm(ev2):
+                name = spot_input.value.strip()
+                if not name:
+                    ev2.page.show_snack_bar(ft.SnackBar(content=ft.Text("スポット名を入力してください")))
+                    return
+                cell = find_cell()
+                if cell:
+                    for f in cell.setdefault("furniture", []):
+                        if f["name"] == furn_name:
+                            f.setdefault("spots", []).append(name)
+                            break
+                    save_floorplan(floorplan)
+                    sub_dlg.open = False
+                    sub_dlg.update()
+                    rebuild_furniture_ui()
+            sub_dlg = ft.AlertDialog(
+                modal=True, title=ft.Text(f"「{furn_name}」にスポットを追加"),
+                content=spot_input,
+                actions=[
+                    ft.TextButton("キャンセル", on_click=lambda e: setattr(sub_dlg, 'open', False) or sub_dlg.update()),
+                    ft.FilledButton("追加", on_click=confirm),
+                ],
+            )
+            page.show_dialog(sub_dlg)
 
         def save_cell(ev):
             nonlocal floorplan
             room = room_input.value.strip()
-            spots = spots_input.value.strip()
             if not room:
                 ev.page.show_snack_bar(ft.SnackBar(content=ft.Text("部屋名を入力してください")))
                 return
-            new_cells = [x for x in floorplan.get("cells", []) if not (x["r"] == r and x["c"] == c)]
-            new_cells.append({"r": r, "c": c, "room": room, "spots": spots})
-            floorplan["cells"] = new_cells
+            cell = find_cell()
+            if cell:
+                cell["room"] = room
+            else:
+                floorplan["cells"].append({"r": r, "c": c, "room": room, "furniture": []})
             save_floorplan(floorplan)
             dlg.open = False
             dlg.update()
@@ -1166,16 +1346,23 @@ def main(page: ft.Page):
             dlg.update()
             build_floorplan_grid()
 
-        actions = [ft.FilledButton("保存", on_click=save_cell)]
-        if existing:
-            actions.insert(0, ft.TextButton("削除", on_click=delete_cell))
-        actions.append(ft.TextButton("キャンセル", on_click=lambda e: setattr(dlg, 'open', False) or dlg.update()))
-
+        rebuild_furniture_ui()
         dlg = ft.AlertDialog(
             modal=True,
-            title=ft.Text(f"セル ({r+1}, {c+1}) を編集"),
-            content=ft.Column([room_input, spots_input], tight=True, spacing=8),
-            actions=actions,
+            title=ft.Text(f"「{existing['room'] if existing else f'セル ({r+1},{c+1})'}」を編集"),
+            content=ft.Column([
+                room_input,
+                ft.Divider(height=4),
+                ft.Row([
+                    ft.Text("家具・スポット", size=13, weight=ft.FontWeight.BOLD, color=ft.Colors.TEAL_800, expand=True),
+                    ft.TextButton("＋家具を追加", on_click=add_furniture_dialog),
+                ]),
+                furniture_list,
+            ], tight=True, spacing=8, width=350, scroll=ft.ScrollMode.AUTO),
+            actions=[
+                ft.FilledButton("保存", on_click=save_cell),
+                ft.TextButton("キャンセル", on_click=lambda e: setattr(dlg, 'open', False) or dlg.update()),
+            ],
         )
         page.show_dialog(dlg)
 
@@ -1193,46 +1380,104 @@ def main(page: ft.Page):
         cell_map = {(c["r"], c["c"]): c for c in floorplan.get("cells", [])}
         rows = floorplan["rows"]
         cols = floorplan["cols"]
-        grid_rows = []
-        for r in range(rows):
-            row_cells = []
-            for c in range(cols):
-                cell = cell_map.get((r, c))
-                label = cell["room"] if cell else f"({r+1},{c+1})"
-                cont = ft.Container(
-                    content=ft.Text(label, size=12, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
-                    width=70, height=48,
-                    bgcolor=ft.Colors.AMBER_50 if cell else ft.Colors.GREY_200,
-                    border=ft.Border.all(1, ft.Colors.TEAL_300 if cell else ft.Colors.GREY_400),
-                    border_radius=6, alignment=ft.Alignment.CENTER, ink=True,
-                    on_click=lambda ev, rr=r, cc=c: _pick_cell(ev, rr, cc),
-                )
-                row_cells.append(cont)
-            grid_rows.append(ft.Row(row_cells, spacing=3, alignment=ft.MainAxisAlignment.CENTER))
+        path_text = ft.Text("部屋を選んでください", size=14, weight=ft.FontWeight.BOLD, color=ft.Colors.TEAL_800)
+        content_area = ft.Column(spacing=4)
 
-        def _pick_cell(ev, r, c):
-            cell = cell_map.get((r, c))
-            if cell:
-                room = cell["room"]
-                spots = cell.get("spots", "")
-                loc_text = room
-                if spots:
-                    first_spot = spots.split(",")[0].strip()
-                    loc_text = f"{room}（{first_spot}）"
-                location_ref.current.value = loc_text
-            else:
-                location_ref.current.value = f"({r+1},{c+1})"
+        def show_room_grid():
+            path_text.value = "部屋を選んでください"
+            path_text.update()
+            grid_rows = []
+            for r in range(rows):
+                row_cells = []
+                for c in range(cols):
+                    cell = cell_map.get((r, c))
+                    label = cell["room"] if cell else f"({r+1},{c+1})"
+                    cont = ft.Container(
+                        content=ft.Text(label, size=12, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
+                        width=70, height=48,
+                        bgcolor=ft.Colors.AMBER_50 if cell else ft.Colors.GREY_200,
+                        border=ft.Border.all(1, ft.Colors.TEAL_300 if cell else ft.Colors.GREY_400),
+                        border_radius=6, alignment=ft.Alignment.CENTER, ink=True,
+                        on_click=lambda ev, rr=r, cc=c: show_furniture_list(rr, cc),
+                    )
+                    row_cells.append(cont)
+                grid_rows.append(ft.Row(row_cells, spacing=3, alignment=ft.MainAxisAlignment.CENTER))
+            content_area.controls = [
+                ft.Text("タップして部屋を選択", size=11, color=ft.Colors.GREY_600),
+                ft.Column(grid_rows, spacing=3, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+            ]
+            content_area.update()
+
+        def show_furniture_list(rr, cc):
+            cell = cell_map.get((rr, cc))
+            if not cell:
+                set_location(f"({rr+1},{cc+1})")
+                return
+            path_text.value = cell["room"]
+            path_text.update()
+            furn = cell.get("furniture", [])
+            if not furn:
+                set_location(cell["room"])
+                return
+            items = []
+            for f in furn:
+                items.append(ft.Container(
+                    content=ft.Row([
+                        ft.Text(f["name"], size=14, weight=ft.FontWeight.W_500, expand=True),
+                        ft.Text("›", size=16, color=ft.Colors.GREY_500),
+                    ]),
+                    padding=12,
+                    bgcolor=ft.Colors.AMBER_50,
+                    border=ft.Border.all(1, ft.Colors.AMBER_200),
+                    border_radius=6,
+                    ink=True,
+                    on_click=lambda ev, fn=f["name"]: show_spot_list(rr, cc, fn),
+                ))
+            content_area.controls = [
+                ft.TextButton("← 部屋一覧に戻る", on_click=lambda ev: show_room_grid()),
+                ft.Divider(height=2),
+                ft.Text("家具を選んでください", size=11, color=ft.Colors.GREY_600),
+                ft.Column(items, spacing=4),
+            ]
+            content_area.update()
+
+        def show_spot_list(rr, cc, furn_name):
+            cell = cell_map.get((rr, cc))
+            furn = next((f for f in cell.get("furniture", []) if f["name"] == furn_name), None)
+            if not furn or not furn.get("spots"):
+                set_location(f"{cell['room']} > {furn_name}")
+                return
+            path_text.value = f"{cell['room']} > {furn_name}"
+            path_text.update()
+            items = []
+            for s in furn["spots"]:
+                items.append(ft.Container(
+                    content=ft.Text(s, size=13),
+                    padding=10,
+                    bgcolor=ft.Colors.AMBER_100,
+                    border_radius=6,
+                    ink=True,
+                    on_click=lambda ev, sp=s: set_location(f"{cell['room']} > {furn_name} > {sp}"),
+                ))
+            content_area.controls = [
+                ft.TextButton("← 家具一覧に戻る", on_click=lambda ev: show_furniture_list(rr, cc)),
+                ft.Divider(height=2),
+                ft.Text("スポットを選んでください", size=11, color=ft.Colors.GREY_600),
+                ft.Column(items, spacing=4),
+            ]
+            content_area.update()
+
+        def set_location(loc_text):
+            location_ref.current.value = loc_text
             location_ref.current.update()
             dlg.open = False
             dlg.update()
 
+        show_room_grid()
         dlg = ft.AlertDialog(
             modal=True,
-            title=ft.Text("間取りから選ぶ"),
-            content=ft.Column([
-                ft.Text("場所をタップして選択", size=12, color=ft.Colors.GREY_600),
-                ft.Column(grid_rows, spacing=3, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
-            ], tight=True, spacing=8, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+            title=path_text,
+            content=ft.Column([content_area], tight=True, spacing=8, width=300),
             actions=[ft.TextButton("キャンセル", on_click=lambda ev: setattr(dlg, 'open', False) or dlg.update())],
         )
         e.page.show_dialog(dlg)
