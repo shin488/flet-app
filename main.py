@@ -3,6 +3,7 @@ from collections import Counter, defaultdict
 import json
 import unicodedata
 import calendar
+import math
 
 import flet as ft
 
@@ -25,15 +26,6 @@ DEFAULT_TENDENCIES = {
     "カバン": ["玄関", "机の上", "車の中", "会社/学校"],
     "その他": ["ポケット", "カバンの中", "机の上", "ソファの隙間"],
 }
-
-TIME_RANGES = [
-    ("早朝 (5時前)", (0, 5)),
-    ("朝 (5〜10時)", (5, 10)),
-    ("昼 (10〜14時)", (10, 14)),
-    ("夕方 (14〜18時)", (14, 18)),
-    ("夜 (18〜21時)", (18, 21)),
-    ("深夜 (21〜24時)", (21, 24)),
-]
 
 # フリー自然画像（Unsplash）— 背景に控えめに使用、起動ごとにランダム選択
 import random as _random
@@ -66,12 +58,6 @@ def parse_weekday(d: str):
             pass
     return None
 
-
-def get_time_range_label(hour):
-    for label, (start, end) in TIME_RANGES:
-        if start <= hour < end:
-            return label
-    return "日中"
 
 def parse_dt(s):
     for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
@@ -203,58 +189,6 @@ def main(page: ft.Page):
             return records
         return [r for r in records if r.get("category", "") == search_cat]
 
-    def do_search(query):
-        nonlocal search_context_info
-        if not query:
-            return None
-        matched = [r for r in get_filtered() if fuzzy_match(query, r.get("name", ""))]
-        if not matched:
-            defaults = get_default_tendencies(query)
-            if defaults:
-                search_context_info = "一般的な傾向から予測（まだ記録がありません）"
-                return defaults
-            return []
-
-        now = datetime.now()
-        current_day = now.weekday()
-        current_tr = get_time_range_label(now.hour)
-
-        records_with_dt = []
-        for r in matched:
-            d = parse_dt(r.get("found_date", ""))
-            if d:
-                records_with_dt.append((r, d))
-
-        exact = [r for r, d in records_with_dt
-                 if d.weekday() == current_day and get_time_range_label(d.hour) == current_tr]
-        day_only = [r for r, d in records_with_dt if d.weekday() == current_day]
-
-        if len(exact) >= 2:
-            pool = exact
-            search_context_info = f"📅 {WEEKDAYS_JP[current_day]} | 🕐 {current_tr} のデータから予測"
-        elif len(day_only) >= 2:
-            pool = day_only
-            search_context_info = f"📅 {WEEKDAYS_JP[current_day]} のデータから予測"
-        else:
-            pool = matched
-            search_context_info = "過去の全データから予測（コンテキスト一致なし）"
-
-        total = len(pool)
-        counts = Counter(r.get("location", "") for r in pool)
-        n_locations = len(set(r.get("location", "場所不明") for r in pool))
-
-        alpha = 0.5
-        results = []
-        for loc, cnt in counts.most_common():
-            pct = (cnt + alpha) / (total + alpha * n_locations) * 100
-            results.append((loc or "場所不明", cnt, pct, False))
-
-        if results:
-            max_pct = max(r[2] for r in results)
-            results = [(loc, cnt, pct, pct == max_pct) for loc, cnt, pct in results]
-
-        return results
-
     def get_default_tendencies(query):
         for name, places in DEFAULT_TENDENCIES.items():
             if fuzzy_match(query, name):
@@ -262,46 +196,128 @@ def main(page: ft.Page):
                 return [(p, 1, 100 / total, i == 0) for i, p in enumerate(places)]
         return None
 
-    def build_markov_prediction(matched):
-        sorted_records = []
-        for r in matched:
-            d = parse_dt(r.get("found_date", ""))
-            if d:
-                sorted_records.append((r, d))
-        sorted_records.sort(key=lambda x: x[1])
+    def build_name_to_category():
+        name_to_cat = {}
+        cat_counts = defaultdict(Counter)
+        for r in records:
+            name = r.get("name", "")
+            cat = r.get("category", "")
+            if name and cat:
+                cat_counts[name][cat] += 1
+        for name, counts in cat_counts.items():
+            name_to_cat[name] = counts.most_common(1)[0][0]
+        return name_to_cat
 
-        if len(sorted_records) < 2:
-            return None
+    def build_item_location_matrix():
+        matrix = defaultdict(Counter)
+        for r in records:
+            name = r.get("name", "")
+            loc = r.get("location", "")
+            if name and loc:
+                matrix[name][loc] += 1
+        return matrix
 
-        transitions = defaultdict(Counter)
-        for i in range(len(sorted_records) - 1):
-            from_loc = sorted_records[i][0].get("location", "場所不明")
-            to_loc = sorted_records[i + 1][0].get("location", "場所不明")
-            if from_loc and to_loc:
-                transitions[from_loc][to_loc] += 1
+    def item_similarity(name1, name2, matrix, name_to_cat):
+        if name1 == name2:
+            return 1.0
+        cat1 = name_to_cat.get(name1, "")
+        cat2 = name_to_cat.get(name2, "")
+        vec1 = matrix.get(name1)
+        vec2 = matrix.get(name2)
+        if vec1 is not None and vec2 is not None:
+            all_locs = set(vec1) | set(vec2)
+            dot = sum(vec1.get(l, 0) * vec2.get(l, 0) for l in all_locs)
+            norm1 = sum(v * v for v in vec1.values()) ** 0.5
+            norm2 = sum(v * v for v in vec2.values()) ** 0.5
+            if norm1 > 0 and norm2 > 0:
+                cos = dot / (norm1 * norm2)
+                if cos > 0.1:
+                    return cos
+        if cat1 and cat1 == cat2:
+            return 0.2
+        return 0.05
 
-        if not transitions:
-            return None
+    def unified_predict(query_name):
+        if not query_name:
+            return None, ""
+        now = datetime.now()
+        current_dow = now.weekday()
+        current_hour = now.hour
 
-        current_loc = sorted_records[-1][0].get("location", "場所不明")
-        if current_loc not in transitions:
-            return None
+        pool = get_filtered()
+        matrix = build_item_location_matrix()
+        name_to_cat = build_name_to_category()
 
-        next_locs = transitions[current_loc]
-        total = sum(next_locs.values())
-        if total == 0:
-            return None
-        max_cnt = max(next_locs.values())
-        results = [(loc, cnt, cnt / total * 100, cnt == max_cnt)
-                   for loc, cnt in next_locs.most_common()]
-        return current_loc, results
+        matched = [r for r in pool if fuzzy_match(query_name, r.get("name", ""))]
+        has_direct = len(matched) > 0
+
+        location_weights = Counter()
+        direct_count = 0
+        indirect_count = 0
+        total_sim = 0.0
+
+        for r in pool:
+            r_name = r.get("name", "")
+            if not r_name:
+                continue
+            sim = item_similarity(query_name, r_name, matrix, name_to_cat)
+            if sim < 0.02:
+                continue
+
+            fd = r.get("found_date", "")
+            dt = parse_dt(fd)
+            if not dt:
+                continue
+
+            dow_w = 1.0 if dt.weekday() == current_dow else (0.5 if abs(dt.weekday() - current_dow) in (1, 6) else 0.2)
+            hour_diff = abs(dt.hour - current_hour)
+            hour_w = math.exp(-hour_diff * hour_diff / 18)
+            recency = max(0.2, 1 - (now - dt).days / 180)
+
+            weight = sim * dow_w * hour_w * recency
+            total_sim += sim
+
+            loc = r.get("location", "")
+            if loc:
+                location_weights[loc] += weight
+                if sim >= 0.9:
+                    direct_count += 1
+                else:
+                    indirect_count += 1
+
+        if not location_weights or (not has_direct and total_sim < 0.5):
+            defaults = get_default_tendencies(query_name)
+            if defaults:
+                return defaults, "一般的な傾向から予測（まだ記録がありません）"
+            return [], ""
+
+        total_weight = sum(location_weights.values())
+        n_locs = len(location_weights)
+        alpha = max(0.5, min(3.0, 5.0 / max(total_weight, 0.1)))
+
+        results = []
+        for loc, w in location_weights.most_common():
+            pct = (w + alpha) / (total_weight + alpha * n_locs) * 100
+            results.append((loc, round(w, 1), pct, False))
+
+        if results:
+            max_pct = max(r[2] for r in results)
+            results = [(loc, w, pct, pct == max_pct) for loc, w, pct, _ in results]
+
+        parts = []
+        if direct_count:
+            parts.append(f"直接{direct_count}件")
+        if indirect_count:
+            parts.append(f"類似{indirect_count}件")
+        ctx = f"📊 {' + '.join(parts)}のデータから予測"
+        return results, ctx
 
     def search_from_history(name):
-        nonlocal search_val, results
+        nonlocal search_val, results, search_context_info
         search_val = name
         search_ref.current.value = name
         search_ref.current.update()
-        results = do_search(name)
+        results, search_context_info = unified_predict(name)
         tabs.selected_index = 0
         tabs.update()
         refresh()
@@ -309,7 +325,7 @@ def main(page: ft.Page):
 
 
     def on_search_click(e):
-        nonlocal search_val, results
+        nonlocal search_val, results, search_context_info
         q = search_ref.current.value.strip()
         if not q:
             e.page.show_snack_bar(ft.SnackBar(content=ft.Text("なくした物を入力してください")))
@@ -317,7 +333,7 @@ def main(page: ft.Page):
             refresh()
             return
         search_val = q
-        results = do_search(q)
+        results, search_context_info = unified_predict(q)
         refresh()
 
     def on_search_cat_change(e):
@@ -538,40 +554,6 @@ def main(page: ft.Page):
         outer = ft.Container(height=8, bgcolor=ft.Colors.AMBER_100, border_radius=4)
         return ft.Stack([outer, inner])
 
-    def do_time_simulation(query, matched_records):
-        if not matched_records:
-            return []
-        now = datetime.now()
-        current_hour = now.hour
-        current_wd = now.weekday()
-
-        scored = []
-        for r in matched_records:
-            fd = r.get("found_date", "")
-            try:
-                dt = datetime.strptime(fd, "%Y-%m-%d %H:%M")
-            except ValueError:
-                try:
-                    dt = datetime.strptime(fd, "%Y-%m-%d")
-                except ValueError:
-                    continue
-            hour_diff = abs(dt.hour - current_hour)
-            wd_match = 1 if dt.weekday() == current_wd else 0
-            time_score = max(0, 1 - hour_diff / 12)
-            recency_days = (now - dt).days
-            recency_weight = max(0.3, 1 - recency_days / 365)
-            score = (time_score * 0.6 + wd_match * 0.4) * recency_weight
-            scored.append((r.get("location", ""), score))
-        if not scored:
-            return []
-        location_scores = Counter()
-        for loc, sc in scored:
-            location_scores[loc] += sc
-        total_score = sum(location_scores.values())
-        ranked = [(loc, sc, sc / total_score * 100) for loc, sc in location_scores.most_common()]
-        max_pct = ranked[0][2] if ranked else 0
-        return [(loc, sc, pct, pct == max_pct) for loc, sc, pct in ranked]
-
     def refresh():
         nonlocal chips_container, location_chips_container, results_container, simulation_container, history_container, ranking_container
 
@@ -617,10 +599,8 @@ def main(page: ft.Page):
             results_container.controls = [ft.Text("該当する記録がありません", color=ft.Colors.GREY_500)]
             simulation_container.controls = []
         else:
-            total = sum(cnt for _, cnt, _, _ in results)
             name = search_val.strip()
-            matched_count = len([r for r in get_filtered() if fuzzy_match(search_val, r.get("name", ""))])
-            is_default = matched_count == 0
+            is_default = "一般的な傾向" in search_context_info
             rc = [
                 ft.Text(f"「{name}」が見つかりそうな場所",
                         size=17, weight=ft.FontWeight.BOLD, color=ft.Colors.TEAL_800),
@@ -628,22 +608,19 @@ def main(page: ft.Page):
             if is_default:
                 rc.append(ft.Text("まだ記録が少ないため、一般的な傾向を表示しています",
                                   size=11, color=ft.Colors.ORANGE_700, italic=True))
-            rc.append(ft.Text(f"過去 {total} 件の情報から予測",
-                              size=12, color=ft.Colors.GREY_600))
-            rc.append(ft.Text(search_context_info, size=11, color=ft.Colors.BLUE_700, italic=True))
+            rc.append(ft.Text(search_context_info, size=12, color=ft.Colors.GREY_600))
             if is_default:
                 rc.append(ft.Text("このアイテムを実際に見つけたら記録しましょう！精度が上がります",
                                   size=11, color=ft.Colors.GREY_500, italic=True))
             rc.append(ft.Divider(height=4))
-            for loc, cnt, pct, is_top in results:
+            for loc, w, pct, is_top in results:
                 color = ft.Colors.TEAL_700 if is_top else ft.Colors.TEAL_600
-                suffix = f"  {cnt}件" if not is_default else ""
                 card = ft.Container(
                     content=ft.Column([
                         ft.Row([
                             ft.Text(loc, size=13, weight=(
                                 ft.FontWeight.BOLD if is_top else ft.FontWeight.W_500), expand=True),
-                            ft.Text(f"{pct:.0f}%{suffix}", size=12, weight=ft.FontWeight.BOLD, color=color),
+                            ft.Text(f"{pct:.0f}%", size=12, weight=ft.FontWeight.BOLD, color=color),
                         ]),
                         make_bar(pct, ft.Colors.TEAL_400 if is_top else ft.Colors.ORANGE_100),
                     ], spacing=2),
@@ -654,67 +631,7 @@ def main(page: ft.Page):
                 )
                 rc.append(card)
             results_container.controls = rc
-
-            sim_matched = [r for r in get_filtered() if fuzzy_match(search_val, r.get("name", ""))]
-            sim_results = do_time_simulation(search_val, sim_matched)
-            if sim_results:
-                now = datetime.now()
-                wd_name = WEEKDAYS_JP[now.weekday()]
-                sim = [
-                    ft.Divider(height=16),
-                    ft.Text("もしもシミュレーター", size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.TEAL_800),
-                    ft.Text(f"今は{wd_name}曜日 {now.hour}時台のデータから予測",
-                            size=12, color=ft.Colors.GREY_600),
-                    ft.Divider(height=4),
-                ]
-                for loc, sc, pct, is_top in sim_results:
-                    color = ft.Colors.BROWN_700 if is_top else ft.Colors.TEAL_600
-                    card = ft.Container(
-                        content=ft.Column([
-                            ft.Row([
-                                ft.Text(loc, size=13, weight=(
-                                    ft.FontWeight.BOLD if is_top else ft.FontWeight.W_500), expand=True),
-                                ft.Text(f"{pct:.0f}%", size=12, weight=ft.FontWeight.BOLD, color=color),
-                            ]),
-                            make_bar(pct, ft.Colors.BROWN_300 if is_top else ft.Colors.ORANGE_100),
-                        ], spacing=2),
-                        padding=6,
-                        bgcolor=ft.Colors.with_opacity(0.8, ft.Colors.ORANGE_50) if is_top else ft.Colors.with_opacity(0.8, ft.Colors.WHITE),
-                        border=ft.Border.all(1, ft.Colors.BROWN_200 if is_top else ft.Colors.AMBER_100),
-                        border_radius=6,
-                    )
-                    sim.append(card)
-                simulation_container.controls = sim
-            else:
-                simulation_container.controls = []
-
-            markov_result = build_markov_prediction(sim_matched)
-            if markov_result:
-                markov_loc, markov_transitions = markov_result
-                markov_cards = [
-                    ft.Divider(height=16),
-                    ft.Text("遷移パターンから予測", size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.TEAL_800),
-                    ft.Text(f"前回「{markov_loc}」で見つかりました → 次回の予測:",
-                            size=12, color=ft.Colors.GREY_600),
-                    ft.Divider(height=4),
-                ]
-                for loc, cnt, pct, is_top in markov_transitions:
-                    color = ft.Colors.INDIGO_700 if is_top else ft.Colors.TEAL_600
-                    markov_cards.append(ft.Container(
-                        content=ft.Column([
-                            ft.Row([
-                                ft.Text(loc, size=13, weight=ft.FontWeight.BOLD if is_top else ft.FontWeight.W_500, expand=True),
-                                ft.Text(f"{pct:.0f}%", size=12, weight=ft.FontWeight.BOLD, color=color),
-                            ]),
-                            make_bar(pct, ft.Colors.INDIGO_300 if is_top else ft.Colors.ORANGE_100),
-                        ], spacing=2),
-                        padding=6,
-                        bgcolor=ft.Colors.with_opacity(0.8, ft.Colors.INDIGO_50) if is_top else ft.Colors.with_opacity(0.8, ft.Colors.WHITE),
-                        border=ft.Border.all(1, ft.Colors.INDIGO_200 if is_top else ft.Colors.AMBER_100),
-                        border_radius=6,
-                    ))
-                simulation_container.controls = simulation_container.controls + markov_cards
-                simulation_container.update()
+            simulation_container.controls = []
 
         if not records:
             history_container.controls = [
